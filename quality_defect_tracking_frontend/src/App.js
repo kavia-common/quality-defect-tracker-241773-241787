@@ -729,12 +729,18 @@ function ProgressBar({ value }) {
 }
 
 /**
- * @param {{title:string, value:string, hint?:string, tone?:"primary"|"success"|"danger"|"neutral"}} props
+ * @param {{title:string, value:string, hint?:string, tone?:"primary"|"success"|"danger"|"neutral", icon?: string}} props
  */
-function StatCard({ title, value, hint, tone = "neutral" }) {
+function StatCard({ title, value, hint, tone = "neutral", icon }) {
+  const toneIcon = tone === "danger" ? "⚠" : tone === "success" ? "✓" : tone === "primary" ? "↗" : "●";
   return (
     <div className={`card statCard statTone_${tone}`}>
-      <div className="statTitle">{title}</div>
+      <div className="statTop">
+        <div className="statTitle">{title}</div>
+        <div className="statIcon" aria-hidden="true">
+          {icon || toneIcon}
+        </div>
+      </div>
       <div className="statValue">{value}</div>
       {hint ? <div className="statHint">{hint}</div> : null}
     </div>
@@ -1196,12 +1202,30 @@ function App() {
             </section>
 
             <section className="gridStats">
-              <StatCard title="Total defects" value={String(stats.total)} hint="All logged items" tone="neutral" />
-              <StatCard title="Open" value={String(stats.open)} hint="Needs attention" tone="danger" />
-              <StatCard title="In progress" value={String(stats.inProgress)} hint="Being investigated" tone="primary" />
-              <StatCard title="Resolved/Closed" value={String(stats.resolved + stats.closed)} hint="Completed items" tone="success" />
-              <StatCard title="Critical/High" value={String(stats.critical + stats.high)} hint="Risk concentration" tone="danger" />
-              <StatCard title="Open actions" value={String(stats.actionsOpen)} hint="Corrective actions pending" tone="primary" />
+              <div style={{ gridColumn: "span 2" }}>
+                <StatCard title="Total defects" value={String(stats.total)} hint="All logged items" tone="neutral" icon="Σ" />
+              </div>
+              <div style={{ gridColumn: "span 2" }}>
+                <StatCard title="Open" value={String(stats.open)} hint="Needs attention" tone="danger" icon="!" />
+              </div>
+              <div style={{ gridColumn: "span 2" }}>
+                <StatCard title="In progress" value={String(stats.inProgress)} hint="Being investigated" tone="primary" icon="⟳" />
+              </div>
+              <div style={{ gridColumn: "span 2" }}>
+                <StatCard
+                  title="Resolved/Closed"
+                  value={String(stats.resolved + stats.closed)}
+                  hint="Completed items"
+                  tone="success"
+                  icon="✓"
+                />
+              </div>
+              <div style={{ gridColumn: "span 2" }}>
+                <StatCard title="Critical/High" value={String(stats.critical + stats.high)} hint="Risk concentration" tone="danger" icon="▲" />
+              </div>
+              <div style={{ gridColumn: "span 2" }}>
+                <StatCard title="Open actions" value={String(stats.actionsOpen)} hint="Corrective actions pending" tone="primary" icon="☑" />
+              </div>
             </section>
 
             <section className="gridTwo">
