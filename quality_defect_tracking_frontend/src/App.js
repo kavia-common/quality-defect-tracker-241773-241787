@@ -538,11 +538,7 @@ function computeStats(defects) {
  * @param {number} max
  * @returns {number}
  */
-function clampInt(value, min, max) {
-  const n = Number.parseInt(value, 10);
-  if (Number.isNaN(n)) return min;
-  return Math.max(min, Math.min(max, n));
-}
+
 
 /**
  * @param {{open: boolean, title: string, description?: string, children: any, onClose: () => void, footer?: any}} props
@@ -861,7 +857,7 @@ function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const defects = state.defects || [];
+  const defects = useMemo(() => state.defects || [], [state.defects]);
 
   const stats = useMemo(() => computeStats(defects), [defects]);
 
