@@ -856,18 +856,32 @@ code {
   padding: 0 16px 16px;
 }
 
-.detailsTop {
+/* Modern “hero” header for the selected defect (keeps existing blue/cyan theme) */
+.detailsHero {
+  margin-top: 2px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.10), rgba(6, 182, 212, 0.06));
+}
+
+[data-theme="dark"] .detailsHero {
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.16), rgba(34, 211, 238, 0.08));
+}
+
+.detailsHeroTop {
   display: flex;
   justify-content: space-between;
   gap: 10px;
   align-items: flex-start;
-  padding: 0 0 12px;
+  padding: 0 0 10px;
 }
 
 .detailsTitle {
   font-weight: 950;
   letter-spacing: -0.02em;
   font-size: 16px;
+  line-height: 1.25;
 }
 
 .detailsPills {
@@ -876,17 +890,94 @@ code {
   flex-wrap: wrap;
 }
 
+.detailsHeroMeta {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  padding: 2px 0 10px;
+}
+
+.detailsMetaItem {
+  grid-column: span 4;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 10px 10px;
+}
+
+[data-theme="dark"] .detailsMetaItem {
+  background: rgba(15, 23, 42, 0.60);
+}
+
+.detailsMetaLabel {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.detailsMetaValue {
+  margin-top: 6px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.detailsHeroProgress {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 10px;
+}
+
+.detailsProgressTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
 .detailsActionsRow {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .divider {
   height: 1px;
   background: var(--border);
   margin: 14px 0;
+}
+
+/* Section framing inside details panel */
+.detailsSection {
+  display: grid;
+  gap: 10px;
+}
+
+.detailsSectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.detailsSectionTitle {
+  font-weight: 950;
+  letter-spacing: -0.02em;
+}
+
+.detailsSectionSub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detailsSectionRight {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .detailsGrid {
@@ -905,6 +996,7 @@ code {
   grid-column: 1 / -1;
 }
 
+/* Keep existing subsection semantics used elsewhere */
 .subSection {
   margin-top: 6px;
 }
@@ -1273,6 +1365,14 @@ code {
     position: relative;
     top: 0;
   }
+
+  .detailsHeroMeta {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+
+  .detailsMetaItem {
+    grid-column: span 4;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1302,6 +1402,19 @@ code {
 
   .gridStats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detailsHeroTop {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .detailsHeroMeta {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .detailsMetaItem {
+    grid-column: span 6;
   }
 
   .detailsGrid {

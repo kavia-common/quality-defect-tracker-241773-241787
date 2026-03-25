@@ -1458,163 +1458,200 @@ function App() {
             <aside className="card detailsCard">
               <div className="cardHeader">
                 <div>
-                  <div className="cardTitle">Details</div>
-                  <div className="cardSub">{selectedDefect ? "Manage defect workflow and actions" : "Select a defect"}</div>
+                  <div className="cardTitle">Defect details</div>
+                  <div className="cardSub">{selectedDefect ? "Triage, workflow, and corrective actions" : "Select a defect to begin"}</div>
                 </div>
               </div>
 
               {!selectedDefect ? (
                 <div className="emptyState">
-                  Select a defect card to see details here. Use the workflow panel to run root-cause and corrective actions.
+                  Select a defect card to see details here. This panel is optimized for quick triage and deeper workflow editing.
                 </div>
               ) : (
                 <div className="detailsBody">
-                  <div className="detailsTop">
-                    <div className="detailsTitle">{selectedDefect.title || "(Untitled defect)"}</div>
-                    <div className="detailsPills">
-                      <StatusPill status={selectedDefect.status} />
-                      <SeverityPill severity={selectedDefect.severity} />
+                  <div className="detailsHero">
+                    <div className="detailsHeroTop">
+                      <div className="detailsTitle">{selectedDefect.title || "(Untitled defect)"}</div>
+                      <div className="detailsPills">
+                        <StatusPill status={selectedDefect.status} />
+                        <SeverityPill severity={selectedDefect.severity} />
+                      </div>
+                    </div>
+
+                    <div className="detailsHeroMeta">
+                      <div className="detailsMetaItem">
+                        <div className="detailsMetaLabel">Area</div>
+                        <div className="detailsMetaValue">{selectedDefect.area || "—"}</div>
+                      </div>
+                      <div className="detailsMetaItem">
+                        <div className="detailsMetaLabel">Category</div>
+                        <div className="detailsMetaValue">{selectedDefect.category || "—"}</div>
+                      </div>
+                      <div className="detailsMetaItem">
+                        <div className="detailsMetaLabel">Detected</div>
+                        <div className="detailsMetaValue">{selectedDefect.detectedOn ? formatDate(selectedDefect.detectedOn) : "—"}</div>
+                      </div>
+                      <div className="detailsMetaItem">
+                        <div className="detailsMetaLabel">Owner</div>
+                        <div className="detailsMetaValue">{selectedDefect.assignedTo || "Unassigned"}</div>
+                      </div>
+                      <div className="detailsMetaItem">
+                        <div className="detailsMetaLabel">Workflow</div>
+                        <div className="detailsMetaValue">{selectedDefect.rootCause?.stage || "New"}</div>
+                      </div>
+                    </div>
+
+                    <div className="detailsHeroProgress">
+                      <div className="detailsProgressTop">
+                        <span className="mutedSmall">Workflow progress</span>
+                        <span className="mutedSmall">{workflowProgress(selectedDefect)}%</span>
+                      </div>
+                      <ProgressBar value={workflowProgress(selectedDefect)} />
+                    </div>
+
+                    <div className="detailsActionsRow">
+                      <button className="btn btnSmall btnGhost" onClick={() => quickAdvanceWorkflow(selectedDefect)}>
+                        Advance workflow
+                      </button>
+                      <button className="btn btnSmall btnGhost" onClick={() => quickSetResolved(selectedDefect)}>
+                        Toggle Resolved
+                      </button>
+                      <button className="btn btnSmall btnGhost" onClick={() => quickSetClosed(selectedDefect)}>
+                        Toggle Closed
+                      </button>
+                      <button className="btn btnSmall btnGhost" onClick={() => duplicateDefect(selectedDefect)}>
+                        Duplicate
+                      </button>
+                      <button className="btn btnSmall btnDanger" onClick={() => deleteDefect(selectedDefect.id)}>
+                        Delete
+                      </button>
                     </div>
                   </div>
 
-                  <div className="detailsActionsRow">
-                    <button className="btn btnSmall btnGhost" onClick={() => quickAdvanceWorkflow(selectedDefect)}>
-                      Advance workflow
-                    </button>
-                    <button className="btn btnSmall btnGhost" onClick={() => quickSetResolved(selectedDefect)}>
-                      Toggle Resolved
-                    </button>
-                    <button className="btn btnSmall btnGhost" onClick={() => quickSetClosed(selectedDefect)}>
-                      Toggle Closed
-                    </button>
-                    <button className="btn btnSmall btnGhost" onClick={() => duplicateDefect(selectedDefect)}>
-                      Duplicate
-                    </button>
-                    <button className="btn btnSmall btnDanger" onClick={() => deleteDefect(selectedDefect.id)}>
-                      Delete
-                    </button>
-                  </div>
-
                   <div className="divider" />
 
-                  <div className="detailsGrid">
-                    <TextInput
-                      label="Title"
-                      value={selectedDefect.title}
-                      onChange={(v) => patchDefect(selectedDefect, { title: v })}
-                      placeholder="Short summary"
-                    />
-                    <Select
-                      label="Status"
-                      value={selectedDefect.status}
-                      onChange={(v) => patchDefect(selectedDefect, { status: v })}
-                      options={statusOptions.filter((o) => o.value !== "All")}
-                    />
-                    <Select
-                      label="Severity"
-                      value={selectedDefect.severity}
-                      onChange={(v) => patchDefect(selectedDefect, { severity: v })}
-                      options={severityOptions.filter((o) => o.value !== "All")}
-                    />
-                    <TextInput
-                      label="Category"
-                      value={selectedDefect.category}
-                      onChange={(v) => patchDefect(selectedDefect, { category: v })}
-                      placeholder="e.g. Process"
-                    />
-                    <TextInput
-                      label="Area"
-                      value={selectedDefect.area}
-                      onChange={(v) => patchDefect(selectedDefect, { area: v })}
-                      placeholder="e.g. Assembly"
-                    />
-                    <TextInput
-                      label="Detected by"
-                      value={selectedDefect.detectedBy}
-                      onChange={(v) => patchDefect(selectedDefect, { detectedBy: v })}
-                      placeholder="Person / role"
-                    />
-                    <TextInput
-                      label="Assigned to"
-                      value={selectedDefect.assignedTo}
-                      onChange={(v) => patchDefect(selectedDefect, { assignedTo: v })}
-                      placeholder="Owner"
-                    />
-                    <label className="field">
-                      <span className="label">Detected on</span>
-                      <input
-                        className="input"
-                        type="date"
-                        value={selectedDefect.detectedOn || ""}
-                        onChange={(e) => patchDefect(selectedDefect, { detectedOn: e.target.value })}
-                      />
-                    </label>
-                    <label className="field">
-                      <span className="label">Due date</span>
-                      <input
-                        className="input"
-                        type="date"
-                        value={selectedDefect.dueDate || ""}
-                        onChange={(e) => patchDefect(selectedDefect, { dueDate: e.target.value })}
-                      />
-                    </label>
-
-                    <TextArea
-                      label="Description"
-                      value={selectedDefect.description}
-                      onChange={(v) => patchDefect(selectedDefect, { description: v })}
-                      placeholder="What happened? Where? Impact?"
-                      rows={4}
-                    />
-
-                    <TextArea
-                      label="Resolution summary"
-                      value={selectedDefect.resolutionSummary}
-                      onChange={(v) => patchDefect(selectedDefect, { resolutionSummary: v })}
-                      placeholder="When resolved, capture summary + evidence"
-                      rows={3}
-                    />
-
-                    <label className="field">
-                      <span className="label">Tags (comma separated)</span>
-                      <input
-                        className="input"
-                        value={(selectedDefect.tags || []).join(", ")}
-                        onChange={(e) => patchDefect(selectedDefect, { tags: asStringArray(e.target.value) })}
-                        placeholder="e.g. torque, line2"
-                      />
-                    </label>
-
-                    <label className="field">
-                      <span className="label">Evidence links (comma separated)</span>
-                      <input
-                        className="input"
-                        value={(selectedDefect.evidenceLinks || []).join(", ")}
-                        onChange={(e) => patchDefect(selectedDefect, { evidenceLinks: asStringArray(e.target.value) })}
-                        placeholder="URLs to logs/photos"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="divider" />
-
-                  <div className="subSection">
-                    <div className="subHeader">
+                  <section className="detailsSection">
+                    <div className="detailsSectionHeader">
                       <div>
-                        <div className="subTitle">Root-cause workflow</div>
-                        <div className="subSub">Capture analysis and verification details</div>
+                        <div className="detailsSectionTitle">Summary</div>
+                        <div className="detailsSectionSub">Core fields to triage and route the defect</div>
                       </div>
-                      <div className="subHeaderRight">
+                    </div>
+
+                    <div className="detailsGrid">
+                      <TextInput
+                        label="Title"
+                        value={selectedDefect.title}
+                        onChange={(v) => patchDefect(selectedDefect, { title: v })}
+                        placeholder="Short summary"
+                      />
+                      <Select
+                        label="Status"
+                        value={selectedDefect.status}
+                        onChange={(v) => patchDefect(selectedDefect, { status: v })}
+                        options={statusOptions.filter((o) => o.value !== "All")}
+                      />
+                      <Select
+                        label="Severity"
+                        value={selectedDefect.severity}
+                        onChange={(v) => patchDefect(selectedDefect, { severity: v })}
+                        options={severityOptions.filter((o) => o.value !== "All")}
+                      />
+                      <TextInput
+                        label="Category"
+                        value={selectedDefect.category}
+                        onChange={(v) => patchDefect(selectedDefect, { category: v })}
+                        placeholder="e.g. Process"
+                      />
+                      <TextInput
+                        label="Area"
+                        value={selectedDefect.area}
+                        onChange={(v) => patchDefect(selectedDefect, { area: v })}
+                        placeholder="e.g. Assembly"
+                      />
+                      <TextInput
+                        label="Detected by"
+                        value={selectedDefect.detectedBy}
+                        onChange={(v) => patchDefect(selectedDefect, { detectedBy: v })}
+                        placeholder="Person / role"
+                      />
+                      <TextInput
+                        label="Assigned to"
+                        value={selectedDefect.assignedTo}
+                        onChange={(v) => patchDefect(selectedDefect, { assignedTo: v })}
+                        placeholder="Owner"
+                      />
+                      <label className="field">
+                        <span className="label">Detected on</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={selectedDefect.detectedOn || ""}
+                          onChange={(e) => patchDefect(selectedDefect, { detectedOn: e.target.value })}
+                        />
+                      </label>
+                      <label className="field">
+                        <span className="label">Due date</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={selectedDefect.dueDate || ""}
+                          onChange={(e) => patchDefect(selectedDefect, { dueDate: e.target.value })}
+                        />
+                      </label>
+
+                      <TextArea
+                        label="Description"
+                        value={selectedDefect.description}
+                        onChange={(v) => patchDefect(selectedDefect, { description: v })}
+                        placeholder="What happened? Where? Impact?"
+                        rows={4}
+                      />
+
+                      <TextArea
+                        label="Resolution summary"
+                        value={selectedDefect.resolutionSummary}
+                        onChange={(v) => patchDefect(selectedDefect, { resolutionSummary: v })}
+                        placeholder="When resolved, capture summary + evidence"
+                        rows={3}
+                      />
+
+                      <label className="field">
+                        <span className="label">Tags (comma separated)</span>
+                        <input
+                          className="input"
+                          value={(selectedDefect.tags || []).join(", ")}
+                          onChange={(e) => patchDefect(selectedDefect, { tags: asStringArray(e.target.value) })}
+                          placeholder="e.g. torque, line2"
+                        />
+                      </label>
+
+                      <label className="field">
+                        <span className="label">Evidence links (comma separated)</span>
+                        <input
+                          className="input"
+                          value={(selectedDefect.evidenceLinks || []).join(", ")}
+                          onChange={(e) => patchDefect(selectedDefect, { evidenceLinks: asStringArray(e.target.value) })}
+                          placeholder="URLs to logs/photos"
+                        />
+                      </label>
+                    </div>
+                  </section>
+
+                  <div className="divider" />
+
+                  <section className="detailsSection">
+                    <div className="detailsSectionHeader">
+                      <div>
+                        <div className="detailsSectionTitle">Root-cause workflow</div>
+                        <div className="detailsSectionSub">Capture analysis, verification, and prevention</div>
+                      </div>
+                      <div className="detailsSectionRight">
                         <div className="workflowStage">
                           <span className="mutedSmall">Stage</span>
                           <span className="stageValue">{selectedDefect.rootCause?.stage || "New"}</span>
                         </div>
                       </div>
-                    </div>
-
-                    <div className="workflowProgress">
-                      <ProgressBar value={workflowProgress(selectedDefect)} />
-                      <div className="mutedSmall">Progress is based on stage.</div>
                     </div>
 
                     <div className="detailsGrid">
@@ -1725,17 +1762,17 @@ function App() {
                         rows={3}
                       />
                     </div>
-                  </div>
+                  </section>
 
                   <div className="divider" />
 
-                  <div className="subSection">
-                    <div className="subHeader">
+                  <section className="detailsSection">
+                    <div className="detailsSectionHeader">
                       <div>
-                        <div className="subTitle">Corrective actions</div>
-                        <div className="subSub">Plan and track actions per defect</div>
+                        <div className="detailsSectionTitle">Corrective actions</div>
+                        <div className="detailsSectionSub">Plan, execute, and track actions for closure</div>
                       </div>
-                      <div className="subHeaderRight">
+                      <div className="detailsSectionRight">
                         <button className="btn btnSmall btnPrimary" onClick={() => addAction(selectedDefect)}>
                           + Add action
                         </button>
@@ -1752,7 +1789,11 @@ function App() {
                               placeholder="Action title"
                               onChange={(e) => patchAction(selectedDefect, a.id, { title: e.target.value })}
                             />
-                            <button className="iconButton" onClick={() => deleteAction(selectedDefect, a.id)} aria-label="Delete action">
+                            <button
+                              className="iconButton"
+                              onClick={() => deleteAction(selectedDefect, a.id)}
+                              aria-label="Delete action"
+                            >
                               🗑
                             </button>
                           </div>
@@ -1790,12 +1831,10 @@ function App() {
                         </div>
                       ))}
                       {(selectedDefect.actions || []).length === 0 ? (
-                        <div className="emptyState small">
-                          No actions yet. Add corrective actions to drive closure.
-                        </div>
+                        <div className="emptyState small">No actions yet. Add corrective actions to drive closure.</div>
                       ) : null}
                     </div>
-                  </div>
+                  </section>
                 </div>
               )}
             </aside>
