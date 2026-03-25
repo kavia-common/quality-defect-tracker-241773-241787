@@ -748,65 +748,75 @@ function StatCard({ title, value, hint, tone = "neutral", icon }) {
 }
 
 /**
- * @param {{defect: Defect, onSelect: () => void}} props
+ * @param {{defect: Defect, onSelect: () => void, selected?: boolean}} props
  */
-function DefectCard({ defect, onSelect }) {
+function DefectCard({ defect, onSelect, selected = false }) {
   const progress = workflowProgress(defect);
   const openActions = (defect.actions || []).filter((a) => a.status !== "Done").length;
 
+  // "Dense row" layout: table-like on desktop, stacked on mobile via CSS.
   return (
-    <button className="card defectCard" onClick={onSelect}>
-      <div className="defectTopRow">
-        <div className="defectTitleWrap">
-          <div className="defectTitle">{defect.title || "(Untitled defect)"}</div>
-          <div className="defectMeta">
-            <span className="metaItem">
-              <span className="metaKey">Area:</span> {defect.area || "—"}
+    <button
+      className={`card defectRow ${selected ? "defectRowSelected" : ""}`}
+      onClick={onSelect}
+      aria-label={`Open defect ${defect.title || "(Untitled defect)"}`}
+    >
+      <div className="defectRowMain">
+        <div className="defectRowCol defectRowTitleCol">
+          <div className="defectRowTitleLine">
+            <span className="defectTitle">{defect.title || "(Untitled defect)"}</span>
+          </div>
+          <div className="defectRowSubLine">
+            <span className="mutedSmall">
+              {defect.category || "—"} <span className="metaDot">•</span> {defect.area || "—"}
             </span>
-            <span className="metaDot">•</span>
-            <span className="metaItem">
-              <span className="metaKey">Detected:</span> {formatDate(defect.detectedOn)}
-            </span>
-            {defect.assignedTo ? (
-              <>
-                <span className="metaDot">•</span>
-                <span className="metaItem">
-                  <span className="metaKey">Owner:</span> {defect.assignedTo}
-                </span>
-              </>
-            ) : null}
+            {defect.description ? <span className="defectRowDesc">{defect.description}</span> : null}
           </div>
         </div>
-        <div className="defectPills">
-          <StatusPill status={defect.status} />
-          <SeverityPill severity={defect.severity} />
+
+        <div className="defectRowCol defectRowPillsCol">
+          <div className="defectPills">
+            <StatusPill status={defect.status} />
+            <SeverityPill severity={defect.severity} />
+          </div>
+        </div>
+
+        <div className="defectRowCol defectRowMetaCol">
+          <div className="defectRowMetaGrid">
+            <div className="defectRowMetaItem">
+              <span className="defectRowMetaKey">Detected</span>
+              <span className="defectRowMetaVal">{formatDate(defect.detectedOn) || "—"}</span>
+            </div>
+            <div className="defectRowMetaItem">
+              <span className="defectRowMetaKey">Owner</span>
+              <span className="defectRowMetaVal">{defect.assignedTo || "Unassigned"}</span>
+            </div>
+            <div className="defectRowMetaItem">
+              <span className="defectRowMetaKey">Workflow</span>
+              <span className="defectRowMetaVal">{defect.rootCause?.stage || "New"}</span>
+            </div>
+            <div className="defectRowMetaItem">
+              <span className="defectRowMetaKey">Actions</span>
+              <span className="defectRowMetaVal">{openActions} open</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="defectRowCol defectRowProgressCol" aria-hidden="true">
+          <div className="defectRowProgressTrack">
+            <div className="defectRowProgressFill" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+          </div>
+          <div className="defectRowProgressText">{progress}%</div>
         </div>
       </div>
 
-      <div className="defectDesc">{defect.description || "No description yet."}</div>
-
-      <div className="defectBottomRow">
-        <div className="defectTags">
-          {(defect.tags || []).slice(0, 4).map((t) => (
-            <span key={t} className="tagChip">
-              {t}
-            </span>
-          ))}
-          {(defect.tags || []).length > 4 ? <span className="tagMore">+{(defect.tags || []).length - 4}</span> : null}
-        </div>
-
-        <div className="defectKpis">
-          <span className="kpi">
-            <span className="kpiKey">Actions:</span> {openActions} open
+      <div className="defectRowTags">
+        {(defect.tags || []).slice(0, 6).map((t) => (
+          <span key={t} className="tagChip">
+            {t}
           </span>
-          <span className="kpi">
-            <span className="kpiKey">Workflow:</span> {defect.rootCause?.stage || "New"}
-          </span>
-        </div>
-      </div>
-
-      <div className="defectProgressRow">
-        <ProgressBar value={progress} />
+        ))}
+        {(defect.tags || []).length > 6 ? <span className="tagMore">+{(defect.tags || []).length - 6}</span> : null}
       </div>
     </button>
   );
@@ -1435,9 +1445,14 @@ function App() {
                 </div>
               </div>
 
-              <div className="defectCards">
+              <div className="defectCards defectRows">
                 {filtered.map((d) => (
-                  <DefectCard key={d.id} defect={d} onSelect={() => setSelectedId(d.id)} />
+                  <DefectCard
+                    key={d.id}
+                    defect={d}
+                    selected={d.id === selectedId}
+                    onSelect={() => setSelectedId(d.id)}
+                  />
                 ))}
                 {filtered.length === 0 ? (
                   <div className="emptyState">
