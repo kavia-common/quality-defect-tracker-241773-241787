@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import { createDefect, deleteDefectById, listDefects, updateDefect } from "./defectsRepository";
 
 /**
- * LocalStorage-first, frontend-only Quality Defect Tracking & Root Cause Workflow SPA.
- * No backend/API calls are used; all persistence is in browser localStorage.
+ * Quality Defect Tracking & Root Cause Workflow SPA.
+ *
+ * Persistence:
+ * - API-first via Flask REST API (base URL http://localhost:3001)
+ * - Automatic fallback to localStorage if the API fails (demo-safe)
  */
 
 /** @type {string} */
@@ -895,10 +899,54 @@ function App() {
 
   const [toastItems, setToastItems] = useState(/** @type {ToastItem[]} */ ([]));
 
-  // Persist state to localStorage on change
+  // API loading / sync status (kept lightweight; UI continues to work even if API fails)
+  const [isLoadingDefects, setIsLoadingDefects] = useState(true);
+  const [dataSource, setDataSource] = useState(/** @type {"api"|"local"|null} */ (null));
+
+  // Persist state to localStorage on change (still used as fallback/offline store)
   useEffect(() => {
     saveState(state);
   }, [state]);
+
+  // Initial load from API with fallback to localStorage.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setIsLoadingDefects(true);
+      try {
+        const { defects, source } = await listDefects();
+        if (cancelled) return;
+
+        // Normalize through existing app logic for backward compatibility.
+        setState((prev) => ({
+          ...prev,
+          defects: Array.isArray(defects) ? defects.map((d) => normalizeDefect(d)) : [],
+          lastIdSeed: Array.isArray(defects) ? defects.length : prev.lastIdSeed,
+        }));
+
+        setDataSource(source);
+
+        if (source === "api") {
+          showToast("info", "Synced defects from backend API.");
+        } else {
+          showToast("danger", "Backend API unavailable. Using localStorage fallback.");
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setDataSource("local");
+        showToast("danger", `Failed to load defects. Using localStorage fallback.`);
+      } finally {
+        if (!cancelled) setIsLoadingDefects(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Apply & persist theme
   useEffect(() => {
@@ -983,7 +1031,8 @@ function App() {
    * @param {Defect} d
    * @param {{reason?: "create"|"update"}} [opts]
    */
-  function upsertDefect(d, opts) {
+  async function upsertDefect(d, opts) {
+    // Optimistic local update to keep UX instant.
     setState((prev) => {
       const next = { ...prev };
       const now = Date.now();
@@ -998,17 +1047,39 @@ function App() {
       return next;
     });
 
-    if (opts?.reason === "create") showToast("success", "Defect added.");
-    if (opts?.reason === "update") showToast("success", "Defect updated.");
+    try {
+      if (opts?.reason === "create") {
+        const res = await createDefect(normalizeDefect(d));
+        setDataSource(res.source);
+        if (res.source === "api") showToast("success", "Defect added (saved to backend).");
+        else showToast("danger", "Backend API unavailable. Defect saved to localStorage fallback.");
+      } else {
+        const res = await updateDefect(d.id, normalizeDefect(d));
+        setDataSource(res.source);
+        if (res.source === "api") showToast("success", "Defect updated (saved to backend).");
+        else showToast("danger", "Backend API unavailable. Update saved to localStorage fallback.");
+      }
+    } catch (e) {
+      showToast("danger", "Failed to save to backend. Using localStorage fallback.");
+    }
   }
 
   /**
    * @param {string} id
    */
-  function deleteDefect(id) {
+  async function deleteDefect(id) {
+    // Optimistic local delete.
     setState((prev) => ({ ...prev, defects: (prev.defects || []).filter((d) => d.id !== id) }));
     if (selectedId === id) setSelectedId(null);
-    showToast("success", "Defect deleted.");
+
+    try {
+      const res = await deleteDefectById(id);
+      setDataSource(res.source);
+      if (res.source === "api") showToast("success", "Defect deleted (backend).");
+      else showToast("danger", "Backend API unavailable. Deleted from localStorage fallback.");
+    } catch (e) {
+      showToast("danger", "Failed to delete on backend. Using localStorage fallback.");
+    }
   }
 
   /**
@@ -1416,6 +1487,9 @@ function App() {
               <div className="sectionHeader compactHeader">
                 <div className="sectionTitle">Defects</div>
                 <div className="sectionActions">
+                  <span className="mutedSmall" style={{ alignSelf: "center" }}>
+                    {isLoadingDefects ? "Loading…" : dataSource === "api" ? "Synced (API)" : dataSource === "local" ? "Offline (localStorage)" : ""}
+                  </span>
                   <button className="btn btnGhost" onClick={doExportCsv}>
                     Export CSV
                   </button>
@@ -1426,10 +1500,13 @@ function App() {
               </div>
 
               <div className="defectCards defectRows">
-                {filtered.map((d) => (
-                  <DefectCard key={d.id} defect={d} selected={d.id === selectedId} onSelect={() => setSelectedId(d.id)} />
-                ))}
-                {filtered.length === 0 ? (
+                {isLoadingDefects ? <div className="emptyState">Loading defects from backend… (will fall back to localStorage if needed)</div> : null}
+                {!isLoadingDefects
+                  ? filtered.map((d) => (
+                      <DefectCard key={d.id} defect={d} selected={d.id === selectedId} onSelect={() => setSelectedId(d.id)} />
+                    ))
+                  : null}
+                {!isLoadingDefects && filtered.length === 0 ? (
                   <div className="emptyState">
                     No results. Try clearing filters or create a new defect.
                     <div className="emptyActions">
@@ -1844,7 +1921,7 @@ function App() {
 
       <footer className="footer">
         <div className="mutedSmall">
-          Frontend-only demo app. No backend/API calls. Data stored in <code className="inlineCode">localStorage</code>.
+          API-first demo app with offline fallback. If the backend is unavailable, data is stored in <code className="inlineCode">localStorage</code>.
         </div>
       </footer>
 
