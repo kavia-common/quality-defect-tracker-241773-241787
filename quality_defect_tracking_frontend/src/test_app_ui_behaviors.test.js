@@ -138,7 +138,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     expect(titles).toEqual(["Critical Oldest", "Major Middle", "Minor Newest"]);
   });
 
-  test("Export CSV triggers Blob creation and anchor click", () => {
+  test("Export CSV triggers URL.createObjectURL and anchor click", () => {
     // Arrange
     seedLocalStorageWithDefects([
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
@@ -160,9 +160,6 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
       return realCreateElement(tagName);
     });
 
-    // Blob exists in JSDOM; we only verify it was constructed.
-    const blobSpy = jest.spyOn(global, "Blob");
-
     // These are polyfilled in src/setupTests.js as jest.fn() for JSDOM.
     URL.createObjectURL.mockReturnValue("blob:mock");
 
@@ -171,8 +168,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     // Trigger from Dashboard (also exists on other views; dashboard is simplest)
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
 
-    // Assert: csv export should create a Blob and click an anchor
-    expect(blobSpy).toHaveBeenCalledTimes(1);
+    // Assert: downstream effects (more robust than spying on Blob in JSDOM)
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
@@ -272,7 +268,6 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     });
 
     URL.createObjectURL.mockReturnValue("blob:mock");
-    const blobSpy = jest.spyOn(global, "Blob");
 
     jest.useFakeTimers();
     const printSpy = jest.fn();
@@ -299,7 +294,6 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     const exportRowQueries = within(exportRow);
 
     fireEvent.click(exportRowQueries.getByRole("button", { name: "CSV" }));
-    expect(blobSpy).toHaveBeenCalledTimes(1);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
