@@ -199,85 +199,11 @@ function makeEmptyDefect() {
  * @returns {AppState}
  */
 function seedState() {
-  const now = Date.now();
-  const today = new Date().toISOString().slice(0, 10);
-
-  /** @type {Defect[]} */
-  const defects = [
-    {
-      id: uid("def"),
-      title: "Torque out of spec on Line 2",
-      description: "Fastener torque readings exceeded upper control limit in 3 consecutive checks.",
-      status: "In Progress",
-      severity: "Major",
-      category: "Process",
-      area: "Assembly",
-      detectedOn: today,
-      detectedBy: "QC Tech",
-      assignedTo: "Alex",
-      tags: ["torque", "line2", "control-chart"],
-      evidenceLinks: ["https://example.com/evidence/torque-log"],
-      dueDate: "",
-      resolutionSummary: "",
-      rootCause: {
-        ...defaultRootCause(),
-        stage: "Investigating",
-        problemStatement: "Torque deviation beyond spec on Line 2 station A.",
-        containment: "Quarantine affected lots; increase sampling to 100% for next 24h.",
-        fiveWhys:
-          "1) Why torque high? Tool drifted.\n2) Why drifted? Calibration overdue.\n3) Why overdue? Scheduling missed.\n4) Why missed? No alert.\n5) Why no alert? Manual tracker not updated.",
-        fishbone:
-          "Machine: tool wear\nMethod: calibration schedule\nMan: training\nMeasurement: sampling frequency\nMaterial: fastener batch variability\nEnvironment: humidity",
-        suspectedCauses: ["Tool calibration overdue", "Operator technique variance"],
-        verifiedCauses: [],
-        verificationNotes: "",
-        preventionNotes: "",
-        validationChecklist: "",
-        validatedBy: "",
-        validatedAt: "",
-        closureNotes: "",
-      },
-      actions: [
-        {
-          id: uid("act"),
-          title: "Recalibrate torque tool and add weekly reminder",
-          owner: "Alex",
-          dueDate: today,
-          status: "In Progress",
-          notes: "Coordinate with maintenance; update calibration tracker.",
-          createdAt: now - 1000 * 60 * 60 * 12,
-          updatedAt: now - 1000 * 60 * 25,
-        },
-      ],
-      createdAt: now - 1000 * 60 * 60 * 26,
-      updatedAt: now - 1000 * 60 * 45,
-    },
-    {
-      id: uid("def"),
-      title: "Cosmetic scratch on finished housing",
-      description: "Multiple units show surface scratch near logo region post-packaging.",
-      status: "Open",
-      severity: "Minor",
-      category: "Material",
-      area: "Packaging",
-      detectedOn: today,
-      detectedBy: "Inspector",
-      assignedTo: "Sam",
-      tags: ["cosmetic", "packaging"],
-      evidenceLinks: [],
-      dueDate: "",
-      resolutionSummary: "",
-      rootCause: {
-        ...defaultRootCause(),
-        stage: "New",
-      },
-      actions: [],
-      createdAt: now - 1000 * 60 * 60 * 6,
-      updatedAt: now - 1000 * 60 * 60 * 6,
-    },
-  ];
-
-  return { defects, lastIdSeed: defects.length };
+  // API-first behavior:
+  // - When the backend is available, the app should start from an empty local state
+  //   and hydrate defects from the API.
+  // - localStorage remains only a fallback/offline cache (see defectsRepository).
+  return { defects: [], lastIdSeed: 0 };
 }
 
 /**
@@ -903,10 +829,13 @@ function App() {
   const [isLoadingDefects, setIsLoadingDefects] = useState(true);
   const [dataSource, setDataSource] = useState(/** @type {"api"|"local"|null} */ (null));
 
-  // Persist state to localStorage on change (still used as fallback/offline store)
+  // Persist state to localStorage ONLY when we're running in fallback mode.
+  // When the backend API is available, localStorage should not be the source of truth.
   useEffect(() => {
-    saveState(state);
-  }, [state]);
+    if (dataSource === "local") {
+      saveState(state);
+    }
+  }, [state, dataSource]);
 
   // Initial load from API with fallback to localStorage.
   useEffect(() => {
@@ -918,16 +847,20 @@ function App() {
         const { defects, source } = await listDefects();
         if (cancelled) return;
 
+        const normalized = Array.isArray(defects) ? defects.map((d) => normalizeDefect(d)) : [];
+
         // Normalize through existing app logic for backward compatibility.
         setState((prev) => ({
           ...prev,
-          defects: Array.isArray(defects) ? defects.map((d) => normalizeDefect(d)) : [],
-          lastIdSeed: Array.isArray(defects) ? defects.length : prev.lastIdSeed,
+          defects: normalized,
+          lastIdSeed: normalized.length,
         }));
 
         setDataSource(source);
 
         if (source === "api") {
+          // Keep a local cache up to date for offline fallback without letting it override API usage.
+          saveState({ defects: normalized, lastIdSeed: normalized.length });
           showToast("info", "Synced defects from backend API.");
         } else {
           showToast("danger", "Backend API unavailable. Using localStorage fallback.");
