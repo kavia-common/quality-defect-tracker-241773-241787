@@ -1,8 +1,29 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import App from "./App";
 
 const STORAGE_KEY = "qdt.v1.state";
 const THEME_KEY = "qdt.v1.theme";
+
+/**
+ * The app is now API-first and shows a loading state while it attempts to fetch defects.
+ * For deterministic unit tests, mock fetch to fail fast so the repository falls back
+ * to localStorage immediately and the UI becomes interactive.
+ */
+function mockApiUnavailable() {
+  jest.spyOn(global, "fetch").mockRejectedValue(new Error("Network unavailable in test"));
+}
+
+/**
+ * Wait until the app's initial defects load attempt finishes and the UI is no longer in
+ * its loading state.
+ */
+async function waitForDefectsToFinishLoading() {
+  await waitFor(() => {
+    expect(
+      screen.queryByText(/Loading defects from backend/i)
+    ).not.toBeInTheDocument();
+  });
+}
 
 /**
  * Helper to build a minimal Defect record (App normalizes on load).
@@ -69,9 +90,10 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
   beforeEach(() => {
     window.localStorage.clear();
     jest.restoreAllMocks();
+    mockApiUnavailable();
   });
 
-  test("default defects sorting is created_at latest-first (createdAt desc)", () => {
+  test("default defects sorting is created_at latest-first (createdAt desc)", async () => {
     // Arrange: oldest/major, newest/minor, middle/critical
     const defects = [
       makeDefect({
@@ -96,14 +118,16 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     seedLocalStorageWithDefects(defects);
 
     render(<App />);
+    await waitForDefectsToFinishLoading();
     openDefectsView();
+    await waitForDefectsToFinishLoading();
 
     // Default is Sort=Created date, Dir=Desc => newest first
     const titles = getDefectRowTitlesInOrder();
     expect(titles).toEqual(["New Minor", "Mid Critical", "Old Major"]);
   });
 
-  test("severity sorting uses Critical > Major > Minor when sorting by Severity desc", () => {
+  test("severity sorting uses Critical > Major > Minor when sorting by Severity desc", async () => {
     // Arrange: set createdAt such that createdAt ordering differs from severity ordering.
     const defects = [
       makeDefect({
@@ -128,7 +152,9 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     seedLocalStorageWithDefects(defects);
 
     render(<App />);
+    await waitForDefectsToFinishLoading();
     openDefectsView();
+    await waitForDefectsToFinishLoading();
 
     // Change Sort -> Severity, keep Dir -> Desc
     fireEvent.change(screen.getByLabelText("Sort"), { target: { value: "severity" } });
@@ -138,7 +164,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     expect(titles).toEqual(["Critical Oldest", "Major Middle", "Minor Newest"]);
   });
 
-  test("Export CSV triggers URL.createObjectURL and anchor click", () => {
+  test("Export CSV triggers URL.createObjectURL and anchor click", async () => {
     // Arrange
     seedLocalStorageWithDefects([
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
@@ -169,6 +195,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     URL.createObjectURL.mockReturnValue("blob:mock");
 
     render(<App />);
+    await waitForDefectsToFinishLoading();
 
     // Trigger from Dashboard (also exists on other views; dashboard is simplest)
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
@@ -183,7 +210,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     expect(screen.getByText("Exported CSV.")).toBeInTheDocument();
   });
 
-  test("Export PDF triggers window.open + print (after timer)", () => {
+  test("Export PDF triggers window.open + print (after timer)", async () => {
     jest.useFakeTimers();
 
     // Arrange
@@ -207,6 +234,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     });
 
     render(<App />);
+    await waitForDefectsToFinishLoading();
 
     fireEvent.click(screen.getByRole("button", { name: "Export PDF" }));
 
@@ -228,9 +256,10 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     jest.useRealTimers();
   });
 
-  test("dark mode toggle persists in localStorage and is applied on reload", () => {
+  test("dark mode toggle persists in localStorage and is applied on reload", async () => {
     // Arrange: start with light (default)
     render(<App />);
+    await waitForDefectsToFinishLoading();
 
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
     expect(window.localStorage.getItem(THEME_KEY)).toBe("light");
@@ -246,12 +275,13 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     const { unmount } = render(<App />);
     unmount();
     render(<App />);
+    await waitForDefectsToFinishLoading();
 
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(window.localStorage.getItem(THEME_KEY)).toBe("dark");
   });
 
-  test("Data Tools view export buttons trigger corresponding exports", () => {
+  test("Data Tools view export buttons trigger corresponding exports", async () => {
     // Arrange
     seedLocalStorageWithDefects([
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
@@ -295,6 +325,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     });
 
     render(<App />);
+    await waitForDefectsToFinishLoading();
     fireEvent.click(screen.getByRole("button", { name: "Data Tools" }));
 
     // There are multiple "CSV"/"PDF" buttons on this view (top section + tool row).
