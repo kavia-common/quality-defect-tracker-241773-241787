@@ -144,17 +144,22 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
     ]);
 
+    // Keep a reference to the real implementation so we can create a real DOM node.
     const realCreateElement = document.createElement.bind(document);
 
     const clickSpy = jest.fn();
+    const removeSpy = jest.fn();
+
     jest.spyOn(document, "createElement").mockImplementation((tagName) => {
       if (tagName === "a") {
-        return {
-          set href(_) {},
-          set download(_) {},
-          click: clickSpy,
-          remove: jest.fn(),
-        };
+        // Must be a real Node for document.body.appendChild(a) to work in JSDOM.
+        const a = realCreateElement("a");
+
+        // Override methods so we can assert they were invoked.
+        a.click = clickSpy;
+        a.remove = removeSpy;
+
+        return a;
       }
       // IMPORTANT: call the original implementation to avoid recursion.
       return realCreateElement(tagName);
@@ -171,6 +176,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     // Assert: downstream effects (more robust than spying on Blob in JSDOM)
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
 
     // Assert toast shown
@@ -251,17 +257,22 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
     ]);
 
+    // Keep a reference to the real implementation so we can create a real DOM node.
     const realCreateElement = document.createElement.bind(document);
 
     const clickSpy = jest.fn();
+    const removeSpy = jest.fn();
+
     jest.spyOn(document, "createElement").mockImplementation((tagName) => {
       if (tagName === "a") {
-        return {
-          set href(_) {},
-          set download(_) {},
-          click: clickSpy,
-          remove: jest.fn(),
-        };
+        // Must be a real Node for document.body.appendChild(a) to work in JSDOM.
+        const a = realCreateElement("a");
+
+        // Override methods so we can assert they were invoked.
+        a.click = clickSpy;
+        a.remove = removeSpy;
+
+        return a;
       }
       // IMPORTANT: call the original implementation to avoid recursion.
       return realCreateElement(tagName);
@@ -296,6 +307,7 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     fireEvent.click(exportRowQueries.getByRole("button", { name: "CSV" }));
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
 
     fireEvent.click(exportRowQueries.getByRole("button", { name: "PDF" }));
