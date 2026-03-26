@@ -144,6 +144,8 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
     ]);
 
+    const realCreateElement = document.createElement.bind(document);
+
     const clickSpy = jest.fn();
     jest.spyOn(document, "createElement").mockImplementation((tagName) => {
       if (tagName === "a") {
@@ -154,12 +156,15 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
           remove: jest.fn(),
         };
       }
-      return document.createElement(tagName);
+      // IMPORTANT: call the original implementation to avoid recursion.
+      return realCreateElement(tagName);
     });
 
+    // Blob exists in JSDOM; we only verify it was constructed.
     const blobSpy = jest.spyOn(global, "Blob");
-    const urlCreateSpy = jest.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
-    const urlRevokeSpy = jest.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    // These are polyfilled in src/setupTests.js as jest.fn() for JSDOM.
+    URL.createObjectURL.mockReturnValue("blob:mock");
 
     render(<App />);
 
@@ -168,9 +173,9 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
 
     // Assert: csv export should create a Blob and click an anchor
     expect(blobSpy).toHaveBeenCalledTimes(1);
-    expect(urlCreateSpy).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
-    expect(urlRevokeSpy).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
 
     // Assert toast shown
     expect(screen.getByText("Exported CSV.")).toBeInTheDocument();
@@ -250,6 +255,8 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
       makeDefect({ id: "d1", title: "Defect 1", severity: "Major", createdAt: 1700000000000 }),
     ]);
 
+    const realCreateElement = document.createElement.bind(document);
+
     const clickSpy = jest.fn();
     jest.spyOn(document, "createElement").mockImplementation((tagName) => {
       if (tagName === "a") {
@@ -260,11 +267,12 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
           remove: jest.fn(),
         };
       }
-      return document.createElement(tagName);
+      // IMPORTANT: call the original implementation to avoid recursion.
+      return realCreateElement(tagName);
     });
-    jest.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
-    jest.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    jest.spyOn(global, "Blob");
+
+    URL.createObjectURL.mockReturnValue("blob:mock");
+    const blobSpy = jest.spyOn(global, "Blob");
 
     jest.useFakeTimers();
     const printSpy = jest.fn();
@@ -289,8 +297,12 @@ describe("App UI behaviors: sorting, export triggers, theme persistence", () => 
     expect(exportRow).toBeTruthy();
 
     const exportRowQueries = within(exportRow);
+
     fireEvent.click(exportRowQueries.getByRole("button", { name: "CSV" }));
+    expect(blobSpy).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
     expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
 
     fireEvent.click(exportRowQueries.getByRole("button", { name: "PDF" }));
     jest.advanceTimersByTime(260);
