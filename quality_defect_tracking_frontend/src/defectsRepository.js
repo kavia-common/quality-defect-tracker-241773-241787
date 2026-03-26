@@ -16,14 +16,39 @@ const DEFAULT_API_BASE_URL = "http://localhost:3001";
 
 /**
  * PUBLIC_INTERFACE
- * Get the API base URL. Uses REACT_APP_DEFECTS_API_BASE_URL if set, else defaults to localhost.
+ * Get the API base URL.
+ *
+ * Resolution order:
+ * 1) REACT_APP_API_BASE (preferred; provided by this environment)
+ * 2) REACT_APP_BACKEND_URL (alternate env name; also provided by this environment)
+ * 3) Derive from current browser host by switching to port 3001 (cloud/preview friendly)
+ * 4) Fallback to http://localhost:3001 (local dev)
+ *
+ * Notes:
+ * - This is intentionally tolerant of values with/without a trailing slash.
+ * - The backend serves routes at the root (e.g. /defects).
+ *
  * @returns {string}
  */
 export function getApiBaseUrl() {
-  // CRA exposes env vars prefixed with REACT_APP_
   const env = typeof process !== "undefined" ? process.env : undefined;
-  const configured = env?.REACT_APP_DEFECTS_API_BASE_URL;
-  return configured && String(configured).trim() ? String(configured).trim() : DEFAULT_API_BASE_URL;
+
+  const configured =
+    (env?.REACT_APP_API_BASE && String(env.REACT_APP_API_BASE).trim()) ||
+    (env?.REACT_APP_BACKEND_URL && String(env.REACT_APP_BACKEND_URL).trim());
+
+  if (configured) return String(configured).replace(/\/+$/, "");
+
+  // Cloud/preview default: same hostname, backend on port 3001.
+  // Example:
+  // Frontend: https://<host>:3000  -> Backend: https://<host>:3001
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    const proto = window.location.protocol || "http:";
+    const host = window.location.hostname;
+    return `${proto}//${host}:3001`;
+  }
+
+  return DEFAULT_API_BASE_URL;
 }
 
 /**

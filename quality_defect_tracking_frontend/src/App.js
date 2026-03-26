@@ -6,7 +6,7 @@ import { createDefect, deleteDefectById, listDefects, updateDefect } from "./def
  * Quality Defect Tracking & Root Cause Workflow SPA.
  *
  * Persistence:
- * - API-first via Flask REST API (base URL http://localhost:3001)
+ * - API-first via Flask REST API (base URL is environment-based; see defectsRepository.getApiBaseUrl())
  * - Automatic fallback to localStorage if the API fails (demo-safe)
  */
 
