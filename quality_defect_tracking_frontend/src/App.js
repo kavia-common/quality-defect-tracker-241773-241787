@@ -13,8 +13,16 @@ const STORAGE_KEY = "qdt.v1.state";
 const THEME_KEY = "qdt.v1.theme";
 
 /**
+ * Sorting requirements:
+ * - Severity order: Critical > Major > Minor
+ * - Date field: sort by created_at (latest first by default)
+ *
+ * Note: The app stores timestamps as createdAt/updatedAt (numbers). We map "created_at" to createdAt.
+ */
+
+/**
  * @typedef {"Open"|"In Progress"|"Resolved"|"Closed"} DefectStatus
- * @typedef {"Low"|"Medium"|"High"|"Critical"} Severity
+ * @typedef {"Minor"|"Major"|"Critical"} Severity
  * @typedef {"New"|"Investigating"|"Actions In Progress"|"Validated"|"Closed"} WorkflowStage
  */
 
@@ -84,7 +92,7 @@ const THEME_KEY = "qdt.v1.theme";
  * @property {string} area
  * @property {string} assignedTo
  * @property {string} tag
- * @property {"detectedOn"|"severity"|"status"|"updatedAt"} sortBy
+ * @property {"createdAt"|"severity"} sortBy
  * @property {"asc"|"desc"} sortDir
  */
 
@@ -125,11 +133,12 @@ function formatDate(iso) {
 }
 
 /**
+ * Severity rank per requirement: Critical > Major > Minor
  * @param {Severity} s
  * @returns {number}
  */
 function severityRank(s) {
-  return s === "Critical" ? 4 : s === "High" ? 3 : s === "Medium" ? 2 : 1;
+  return s === "Critical" ? 3 : s === "Major" ? 2 : 1;
 }
 
 /**
@@ -171,7 +180,7 @@ function makeEmptyDefect() {
     title: "",
     description: "",
     status: "Open",
-    severity: "Medium",
+    severity: "Major",
     category: "Process",
     area: "Assembly",
     detectedOn: today,
@@ -202,7 +211,7 @@ function seedState() {
       title: "Torque out of spec on Line 2",
       description: "Fastener torque readings exceeded upper control limit in 3 consecutive checks.",
       status: "In Progress",
-      severity: "High",
+      severity: "Major",
       category: "Process",
       area: "Assembly",
       detectedOn: today,
@@ -217,8 +226,10 @@ function seedState() {
         stage: "Investigating",
         problemStatement: "Torque deviation beyond spec on Line 2 station A.",
         containment: "Quarantine affected lots; increase sampling to 100% for next 24h.",
-        fiveWhys: "1) Why torque high? Tool drifted.\n2) Why drifted? Calibration overdue.\n3) Why overdue? Scheduling missed.\n4) Why missed? No alert.\n5) Why no alert? Manual tracker not updated.",
-        fishbone: "Machine: tool wear\nMethod: calibration schedule\nMan: training\nMeasurement: sampling frequency\nMaterial: fastener batch variability\nEnvironment: humidity",
+        fiveWhys:
+          "1) Why torque high? Tool drifted.\n2) Why drifted? Calibration overdue.\n3) Why overdue? Scheduling missed.\n4) Why missed? No alert.\n5) Why no alert? Manual tracker not updated.",
+        fishbone:
+          "Machine: tool wear\nMethod: calibration schedule\nMan: training\nMeasurement: sampling frequency\nMaterial: fastener batch variability\nEnvironment: humidity",
         suspectedCauses: ["Tool calibration overdue", "Operator technique variance"],
         verifiedCauses: [],
         verificationNotes: "",
@@ -248,7 +259,7 @@ function seedState() {
       title: "Cosmetic scratch on finished housing",
       description: "Multiple units show surface scratch near logo region post-packaging.",
       status: "Open",
-      severity: "Medium",
+      severity: "Minor",
       category: "Material",
       area: "Packaging",
       detectedOn: today,
@@ -280,9 +291,14 @@ function loadState() {
     if (!raw) return seedState();
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.defects)) return seedState();
+
+    // Backward compatibility: map any previous severities to the new spec
+    /** @type {Defect[]} */
+    const normalized = parsed.defects.map((d) => normalizeDefect(d));
+
     return {
-      defects: parsed.defects,
-      lastIdSeed: typeof parsed.lastIdSeed === "number" ? parsed.lastIdSeed : parsed.defects.length,
+      defects: normalized,
+      lastIdSeed: typeof parsed.lastIdSeed === "number" ? parsed.lastIdSeed : normalized.length,
     };
   } catch {
     return seedState();
@@ -331,6 +347,32 @@ function joinListToLines(arr) {
 }
 
 /**
+ * Normalize older records (e.g., if prior versions used Low/Medium/High).
+ * @param {any} d
+ * @returns {Defect}
+ */
+function normalizeDefect(d) {
+  const base = { ...makeEmptyDefect(), ...(d || {}) };
+
+  /** @type {Severity} */
+  let sev = base.severity;
+  // Map previous values into Minor/Major/Critical
+  // Low -> Minor, Medium/High -> Major, Critical -> Critical
+  if (sev === "Low") sev = "Minor";
+  else if (sev === "Medium" || sev === "High") sev = "Major";
+  else if (sev !== "Minor" && sev !== "Major" && sev !== "Critical") sev = "Major";
+
+  return {
+    ...base,
+    severity: sev,
+    rootCause: { ...defaultRootCause(), ...(base.rootCause || {}) },
+    actions: Array.isArray(base.actions) ? base.actions : [],
+    createdAt: typeof base.createdAt === "number" ? base.createdAt : Date.now(),
+    updatedAt: typeof base.updatedAt === "number" ? base.updatedAt : Date.now(),
+  };
+}
+
+/**
  * @param {Defect} d
  * @param {Filters} f
  * @returns {boolean}
@@ -360,35 +402,39 @@ function defectMatchesFilters(d, f) {
 }
 
 /**
+ * Sorting rules:
+ * - createdAt desc by default (latest first)
+ * - if sorting by severity: Critical > Major > Minor (desc means highest severity first)
+ *
  * @param {Defect[]} defects
  * @param {Filters} filters
  * @returns {Defect[]}
  */
 function filterAndSortDefects(defects, filters) {
   const filtered = defects.filter((d) => defectMatchesFilters(d, filters));
-
   const dir = filters.sortDir === "asc" ? 1 : -1;
+
   filtered.sort((a, b) => {
     const key = filters.sortBy;
     let av = 0;
     let bv = 0;
 
-    if (key === "detectedOn") {
-      av = new Date(a.detectedOn || 0).getTime() || 0;
-      bv = new Date(b.detectedOn || 0).getTime() || 0;
+    if (key === "createdAt") {
+      av = a.createdAt || 0;
+      bv = b.createdAt || 0;
     } else if (key === "severity") {
       av = severityRank(a.severity);
       bv = severityRank(b.severity);
-    } else if (key === "status") {
-      av = statusRank(a.status);
-      bv = statusRank(b.status);
-    } else if (key === "updatedAt") {
-      av = a.updatedAt || 0;
-      bv = b.updatedAt || 0;
     }
 
     if (av < bv) return -1 * dir;
     if (av > bv) return 1 * dir;
+
+    // Secondary tie-break: newest createdAt first to keep stable feel
+    const ac = a.createdAt || 0;
+    const bc = b.createdAt || 0;
+    if (ac < bc) return 1;
+    if (ac > bc) return -1;
     return 0;
   });
 
@@ -414,58 +460,22 @@ function workflowProgress(d) {
 /**
  * @param {Defect[]} defects
  */
-function exportJson(defects) {
-  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), defects }, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `quality-defects-export_${new Date().toISOString().slice(0, 10)}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-/**
- * @param {Defect[]} defects
- */
 function exportCsv(defects) {
-  const header = [
-    "id",
-    "title",
-    "status",
-    "severity",
-    "category",
-    "area",
-    "detectedOn",
-    "detectedBy",
-    "assignedTo",
-    "tags",
-    "workflowStage",
-    "actionsOpen",
-    "updatedAt",
-  ];
+  const header = ["id", "title", "severity", "status", "category", "area", "detectedOn", "created_at", "updated_at", "assignedTo", "tags"];
 
-  const rows = defects.map((d) => {
-    const actionsOpen = (d.actions || []).filter((a) => a.status !== "Done").length;
-    return [
-      d.id,
-      (d.title || "").replaceAll('"', '""'),
-      d.status,
-      d.severity,
-      d.category,
-      d.area,
-      d.detectedOn,
-      (d.detectedBy || "").replaceAll('"', '""'),
-      (d.assignedTo || "").replaceAll('"', '""'),
-      (d.tags || []).join("|").replaceAll('"', '""'),
-      d.rootCause?.stage || "",
-      String(actionsOpen),
-      new Date(d.updatedAt || d.createdAt || 0).toISOString(),
-    ];
-  });
+  const rows = defects.map((d) => [
+    d.id,
+    d.title || "",
+    d.severity,
+    d.status,
+    d.category || "",
+    d.area || "",
+    d.detectedOn || "",
+    new Date(d.createdAt || 0).toISOString(),
+    new Date(d.updatedAt || d.createdAt || 0).toISOString(),
+    d.assignedTo || "",
+    (d.tags || []).join("|"),
+  ]);
 
   const csv =
     header.join(",") +
@@ -476,7 +486,7 @@ function exportCsv(defects) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `quality-defects-export_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `quality-defects_${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -484,18 +494,107 @@ function exportCsv(defects) {
 }
 
 /**
- * @param {string} text
- * @returns {{defects: Defect[]} | null}
+ * Simple client-side printable report (used as "PDF" via browser print dialog -> Save as PDF).
+ * @param {Defect[]} defects
  */
-function parseImportJson(text) {
-  try {
-    const obj = JSON.parse(text);
-    if (obj && Array.isArray(obj.defects)) return { defects: obj.defects };
-    if (Array.isArray(obj)) return { defects: obj };
-    return null;
-  } catch {
-    return null;
-  }
+function exportPrintablePdf(defects) {
+  const now = new Date();
+  const stamp = now.toLocaleString();
+
+  const escapeHtml = (s) =>
+    String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+
+  // Keep report focused (per requirement): defect list, severity, status, dates.
+  const rows = defects
+    .slice()
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map((d) => {
+      const created = d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 10) : "";
+      const updated = d.updatedAt ? new Date(d.updatedAt).toISOString().slice(0, 10) : "";
+      return `<tr>
+        <td>${escapeHtml(d.title || "(Untitled)")}</td>
+        <td>${escapeHtml(d.severity)}</td>
+        <td>${escapeHtml(d.status)}</td>
+        <td>${escapeHtml(created)}</td>
+        <td>${escapeHtml(updated)}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quality Defect Report</title>
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; padding: 24px; color: #0f172a; }
+    .printHeader { display:flex; justify-content: space-between; gap:16px; align-items: baseline; }
+    .printTitle { font-size: 18px; font-weight: 900; letter-spacing: -0.02em; }
+    .printMeta { font-size: 12px; color: #475569; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px 10px; font-size: 12px; vertical-align: top; }
+    th { background: #f8fafc; text-align:left; font-weight: 900; }
+    .printFooter { margin-top: 14px; font-size: 11px; color: #64748b; }
+    @media print { body { padding: 0; } .wrap { padding: 18px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap printReport">
+    <div class="printHeader">
+      <div class="printTitle">Quality Defect Report</div>
+      <div class="printMeta">Generated ${escapeHtml(stamp)} • Total ${defects.length}</div>
+    </div>
+    <table class="printTable">
+      <thead>
+        <tr>
+          <th>Defect</th>
+          <th>Severity</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="printFooter">Tip: Use your browser print dialog to “Save as PDF”.</div>
+  </div>
+  <script>window.focus();</script>
+</body>
+</html>`;
+
+  const w = window.open("", "_blank", "noopener,noreferrer,width=960,height=720");
+  if (!w) return false;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Let layout settle before prompting print.
+  setTimeout(() => {
+    w.focus();
+    w.print();
+  }, 250);
+  return true;
+}
+
+/**
+ * @param {Defect[]} defects
+ * @returns {{open:number,inProgress:number,resolved:number,closed:number,total:number,critical:number,major:number,minor:number}}
+ */
+function computeStats(defects) {
+  const total = defects.length;
+  const open = defects.filter((d) => d.status === "Open").length;
+  const inProgress = defects.filter((d) => d.status === "In Progress").length;
+  const resolved = defects.filter((d) => d.status === "Resolved").length;
+  const closed = defects.filter((d) => d.status === "Closed").length;
+  const critical = defects.filter((d) => d.severity === "Critical").length;
+  const major = defects.filter((d) => d.severity === "Major").length;
+  const minor = defects.filter((d) => d.severity === "Minor").length;
+  return { open, inProgress, resolved, closed, total, critical, major, minor };
 }
 
 /**
@@ -510,35 +609,6 @@ function uniqueValues(defects, picker) {
   }
   return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
-
-/**
- * @param {Defect[]} defects
- * @returns {{open:number,inProgress:number,resolved:number,closed:number,total:number,critical:number,high:number,actionsOpen:number}}
- */
-function computeStats(defects) {
-  const total = defects.length;
-  const open = defects.filter((d) => d.status === "Open").length;
-  const inProgress = defects.filter((d) => d.status === "In Progress").length;
-  const resolved = defects.filter((d) => d.status === "Resolved").length;
-  const closed = defects.filter((d) => d.status === "Closed").length;
-  const critical = defects.filter((d) => d.severity === "Critical").length;
-  const high = defects.filter((d) => d.severity === "High").length;
-
-  const actionsOpen = defects.reduce(
-    (acc, d) => acc + (d.actions || []).filter((a) => a.status !== "Done").length,
-    0
-  );
-
-  return { open, inProgress, resolved, closed, total, critical, high, actionsOpen };
-}
-
-/**
- * @param {string} value
- * @param {number} min
- * @param {number} max
- * @returns {number}
- */
-
 
 /**
  * @param {{open: boolean, title: string, description?: string, children: any, onClose: () => void, footer?: any}} props
@@ -556,9 +626,7 @@ function Modal({ open, title, description, children, onClose, footer }) {
         // Basic focus trap
         const el = panelRef.current;
         if (!el) return;
-        const focusables = el.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
+        const focusables = el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
         if (!focusables.length) return;
 
         const first = focusables[0];
@@ -568,7 +636,7 @@ function Modal({ open, title, description, children, onClose, footer }) {
           e.preventDefault();
           // @ts-ignore
           last.focus();
-        // @ts-ignore
+          // @ts-ignore
         } else if (!e.shiftKey && document.activeElement === last) {
           e.preventDefault();
           // @ts-ignore
@@ -583,7 +651,6 @@ function Modal({ open, title, description, children, onClose, footer }) {
 
   useEffect(() => {
     if (open) {
-      // Let React paint first
       setTimeout(() => {
         const el = panelRef.current;
         if (!el) return;
@@ -628,12 +695,7 @@ function SearchInput({ label, value, onChange, placeholder, icon }) {
         <span className="inputIcon" aria-hidden="true">
           {icon || "🔎"}
         </span>
-        <input
-          className="input"
-          value={value}
-          placeholder={placeholder}
-          onChange={(e) => onChange(e.target.value)}
-        />
+        <input className="input" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
       </div>
     </label>
   );
@@ -658,13 +720,7 @@ function TextArea({ label, value, onChange, placeholder, rows = 4 }) {
   return (
     <label className="field">
       <span className="label">{label}</span>
-      <textarea
-        className="textarea"
-        value={value}
-        placeholder={placeholder}
-        rows={rows}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      <textarea className="textarea" value={value} placeholder={placeholder} rows={rows} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
 }
@@ -691,14 +747,7 @@ function Select({ label, value, onChange, options }) {
  * @param {{severity: Severity}} props
  */
 function SeverityPill({ severity }) {
-  const cls =
-    severity === "Critical"
-      ? "pill pillCritical"
-      : severity === "High"
-        ? "pill pillHigh"
-        : severity === "Medium"
-          ? "pill pillMedium"
-          : "pill pillLow";
+  const cls = severity === "Critical" ? "pill pillCritical" : severity === "Major" ? "pill pillHigh" : "pill pillLow";
   return <span className={cls}>{severity}</span>;
 }
 
@@ -754,13 +803,8 @@ function DefectCard({ defect, onSelect, selected = false }) {
   const progress = workflowProgress(defect);
   const openActions = (defect.actions || []).filter((a) => a.status !== "Done").length;
 
-  // "Dense row" layout: table-like on desktop, stacked on mobile via CSS.
   return (
-    <button
-      className={`card defectRow ${selected ? "defectRowSelected" : ""}`}
-      onClick={onSelect}
-      aria-label={`Open defect ${defect.title || "(Untitled defect)"}`}
-    >
+    <button className={`card defectRow ${selected ? "defectRowSelected" : ""}`} onClick={onSelect} aria-label={`Open defect ${defect.title || "(Untitled defect)"}`}>
       <div className="defectRowMain">
         <div className="defectRowCol defectRowTitleCol">
           <div className="defectRowTitleLine">
@@ -792,8 +836,8 @@ function DefectCard({ defect, onSelect, selected = false }) {
               <span className="defectRowMetaVal">{defect.assignedTo || "Unassigned"}</span>
             </div>
             <div className="defectRowMetaItem">
-              <span className="defectRowMetaKey">Workflow</span>
-              <span className="defectRowMetaVal">{defect.rootCause?.stage || "New"}</span>
+              <span className="defectRowMetaKey">Created</span>
+              <span className="defectRowMetaVal">{defect.createdAt ? formatDate(new Date(defect.createdAt).toISOString()) : "—"}</span>
             </div>
             <div className="defectRowMetaItem">
               <span className="defectRowMetaKey">Actions</span>
@@ -822,6 +866,11 @@ function DefectCard({ defect, onSelect, selected = false }) {
   );
 }
 
+/**
+ * Toast manager (top-right stack).
+ * @typedef {{id:string, type:"info"|"success"|"danger", message:string}} ToastItem
+ */
+
 // PUBLIC_INTERFACE
 function App() {
   /** @type {[AppState, Function]} */
@@ -842,7 +891,7 @@ function App() {
       area: "",
       assignedTo: "",
       tag: "",
-      sortBy: "updatedAt",
+      sortBy: "createdAt",
       sortDir: "desc",
     })
   );
@@ -850,10 +899,7 @@ function App() {
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [draft, setDraft] = useState(/** @type {Defect|null} */ (null));
 
-  const [importOpen, setImportOpen] = useState(false);
-  const [importText, setImportText] = useState("");
-  const [importMode, setImportMode] = useState("merge"); // merge | replace
-  const [toast, setToast] = useState(/** @type {{type:"info"|"success"|"danger", message:string} | null} */ (null));
+  const [toastItems, setToastItems] = useState(/** @type {ToastItem[]} */ ([]));
 
   // Persist state to localStorage on change
   useEffect(() => {
@@ -866,12 +912,16 @@ function App() {
     saveTheme(theme);
   }, [theme]);
 
-  // Simple toast auto-clear
+  // Auto-clear toasts
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3200);
-    return () => clearTimeout(t);
-  }, [toast]);
+    if (!toastItems.length) return;
+    const timers = toastItems.map((t) =>
+      setTimeout(() => {
+        setToastItems((prev) => prev.filter((x) => x.id !== t.id));
+      }, 3200)
+    );
+    return () => timers.forEach((id) => clearTimeout(id));
+  }, [toastItems]);
 
   const defects = useMemo(() => state.defects || [], [state.defects]);
 
@@ -895,10 +945,9 @@ function App() {
 
   const severityOptions = /** @type {{value: Severity|"All", label: string}[]} */ ([
     { value: "All", label: "All severities" },
-    { value: "Low", label: "Low" },
-    { value: "Medium", label: "Medium" },
-    { value: "High", label: "High" },
     { value: "Critical", label: "Critical" },
+    { value: "Major", label: "Major" },
+    { value: "Minor", label: "Minor" },
   ]);
 
   const workflowStageOptions = /** @type {{value: WorkflowStage, label: string}[]} */ ([
@@ -916,11 +965,13 @@ function App() {
   ];
 
   /**
+   * PUBLIC_INTERFACE
+   * Show a small top-right toast message.
    * @param {"info"|"success"|"danger"} type
    * @param {string} message
    */
   function showToast(type, message) {
-    setToast({ type, message });
+    setToastItems((prev) => [{ id: uid("toast"), type, message }, ...prev].slice(0, 3));
   }
 
   // PUBLIC_INTERFACE
@@ -936,12 +987,13 @@ function App() {
 
   /**
    * @param {Defect} d
+   * @param {{reason?: "create"|"update"}} [opts]
    */
-  function upsertDefect(d) {
+  function upsertDefect(d, opts) {
     setState((prev) => {
       const next = { ...prev };
       const now = Date.now();
-      const updated = { ...d, updatedAt: now };
+      const updated = normalizeDefect({ ...d, updatedAt: now });
 
       const idx = (next.defects || []).findIndex((x) => x.id === d.id);
       if (idx >= 0) {
@@ -951,6 +1003,9 @@ function App() {
       }
       return next;
     });
+
+    if (opts?.reason === "create") showToast("success", "Defect added.");
+    if (opts?.reason === "update") showToast("success", "Defect updated.");
   }
 
   /**
@@ -975,8 +1030,8 @@ function App() {
    * @param {Partial<Defect>} patch
    */
   function patchDefect(base, patch) {
-    const next = { ...base, ...patch, updatedAt: Date.now() };
-    upsertDefect(next);
+    const next = normalizeDefect({ ...base, ...patch, updatedAt: Date.now() });
+    upsertDefect(next, { reason: "update" });
   }
 
   /**
@@ -984,12 +1039,12 @@ function App() {
    * @param {Partial<RootCause>} patch
    */
   function patchRootCause(d, patch) {
-    const next = {
+    const next = normalizeDefect({
       ...d,
       rootCause: { ...defaultRootCause(), ...(d.rootCause || {}), ...patch },
       updatedAt: Date.now(),
-    };
-    upsertDefect(next);
+    });
+    upsertDefect(next, { reason: "update" });
   }
 
   /**
@@ -1007,8 +1062,9 @@ function App() {
       createdAt: now,
       updatedAt: now,
     };
-    const next = { ...d, actions: [action, ...(d.actions || [])], updatedAt: now };
-    upsertDefect(next);
+    const next = normalizeDefect({ ...d, actions: [action, ...(d.actions || [])], updatedAt: now });
+    upsertDefect(next, { reason: "update" });
+    showToast("success", "Action added.");
   }
 
   /**
@@ -1019,7 +1075,7 @@ function App() {
   function patchAction(d, actionId, patch) {
     const now = Date.now();
     const actions = (d.actions || []).map((a) => (a.id === actionId ? { ...a, ...patch, updatedAt: now } : a));
-    upsertDefect({ ...d, actions, updatedAt: now });
+    upsertDefect(normalizeDefect({ ...d, actions, updatedAt: now }), { reason: "update" });
   }
 
   /**
@@ -1029,7 +1085,8 @@ function App() {
   function deleteAction(d, actionId) {
     const now = Date.now();
     const actions = (d.actions || []).filter((a) => a.id !== actionId);
-    upsertDefect({ ...d, actions, updatedAt: now });
+    upsertDefect(normalizeDefect({ ...d, actions, updatedAt: now }), { reason: "update" });
+    showToast("success", "Action deleted.");
   }
 
   /**
@@ -1065,7 +1122,7 @@ function App() {
    */
   function duplicateDefect(d) {
     const now = Date.now();
-    const copy = {
+    const copy = normalizeDefect({
       ...d,
       id: uid("def"),
       title: `${d.title} (copy)`,
@@ -1074,7 +1131,7 @@ function App() {
       actions: [],
       createdAt: now,
       updatedAt: now,
-    };
+    });
     setState((prev) => ({ ...prev, defects: [copy, ...(prev.defects || [])] }));
     showToast("success", "Defect duplicated.");
   }
@@ -1090,7 +1147,7 @@ function App() {
       area: "",
       assignedTo: "",
       tag: "",
-      sortBy: "updatedAt",
+      sortBy: "createdAt",
       sortDir: "desc",
     });
     showToast("success", "Demo dataset restored.");
@@ -1102,53 +1159,15 @@ function App() {
     showToast("danger", "All defects removed (localStorage cleared for this app state).");
   }
 
-  function doExportJson() {
-    exportJson(defects);
-    showToast("success", "Exported JSON.");
-  }
-
   function doExportCsv() {
     exportCsv(defects);
     showToast("success", "Exported CSV.");
   }
 
-  function openImport() {
-    setImportText("");
-    setImportMode("merge");
-    setImportOpen(true);
-  }
-
-  function applyImport() {
-    const parsed = parseImportJson(importText);
-    if (!parsed) {
-      showToast("danger", "Import failed: invalid JSON. Expect { defects: [...] } or an array of defects.");
-      return;
-    }
-
-    /** @type {Defect[]} */
-    const incoming = parsed.defects.map((d) => ({
-      ...makeEmptyDefect(),
-      ...d,
-      id: d.id || uid("def"),
-      rootCause: { ...defaultRootCause(), ...(d.rootCause || {}) },
-      actions: Array.isArray(d.actions) ? d.actions : [],
-      createdAt: d.createdAt || Date.now(),
-      updatedAt: d.updatedAt || Date.now(),
-    }));
-
-    setState((prev) => {
-      if (importMode === "replace") {
-        return { defects: incoming, lastIdSeed: incoming.length };
-      }
-
-      const byId = new Map((prev.defects || []).map((d) => [d.id, d]));
-      for (const d of incoming) byId.set(d.id, d);
-      const merged = Array.from(byId.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      return { ...prev, defects: merged, lastIdSeed: merged.length };
-    });
-
-    setImportOpen(false);
-    showToast("success", `Imported ${incoming.length} defects (${importMode}).`);
+  function doExportPdf() {
+    const ok = exportPrintablePdf(defects);
+    if (ok) showToast("success", "Opened printable report (Save as PDF).");
+    else showToast("danger", "Popup blocked. Allow popups to export PDF report.");
   }
 
   const headerSubtitle =
@@ -1156,7 +1175,7 @@ function App() {
       ? "Analytics and at-a-glance quality health"
       : view === "defects"
         ? "Log, search, triage, and drive root-cause + corrective actions"
-        : "Export/import, demo reset, and local data controls";
+        : "Export and local data controls";
 
   return (
     <div className="appShell">
@@ -1172,10 +1191,7 @@ function App() {
         </div>
 
         <nav className="nav" aria-label="Primary">
-          <button
-            className={`navBtn ${view === "dashboard" ? "navBtnActive" : ""}`}
-            onClick={() => setView("dashboard")}
-          >
+          <button className={`navBtn ${view === "dashboard" ? "navBtnActive" : ""}`} onClick={() => setView("dashboard")}>
             Dashboard
           </button>
           <button className={`navBtn ${view === "defects" ? "navBtnActive" : ""}`} onClick={() => setView("defects")}>
@@ -1205,8 +1221,11 @@ function App() {
                 <button className="btn btnGhost" onClick={() => setView("defects")}>
                   View defects
                 </button>
-                <button className="btn btnGhost" onClick={doExportJson}>
-                  Export JSON
+                <button className="btn btnGhost" onClick={doExportCsv}>
+                  Export CSV
+                </button>
+                <button className="btn btnGhost" onClick={doExportPdf}>
+                  Export PDF
                 </button>
               </div>
             </section>
@@ -1222,19 +1241,13 @@ function App() {
                 <StatCard title="In progress" value={String(stats.inProgress)} hint="Being investigated" tone="primary" icon="⟳" />
               </div>
               <div style={{ gridColumn: "span 2" }}>
-                <StatCard
-                  title="Resolved/Closed"
-                  value={String(stats.resolved + stats.closed)}
-                  hint="Completed items"
-                  tone="success"
-                  icon="✓"
-                />
+                <StatCard title="Resolved/Closed" value={String(stats.resolved + stats.closed)} hint="Completed items" tone="success" icon="✓" />
               </div>
               <div style={{ gridColumn: "span 2" }}>
-                <StatCard title="Critical/High" value={String(stats.critical + stats.high)} hint="Risk concentration" tone="danger" icon="▲" />
+                <StatCard title="Critical" value={String(stats.critical)} hint="Highest severity" tone="danger" icon="▲" />
               </div>
               <div style={{ gridColumn: "span 2" }}>
-                <StatCard title="Open actions" value={String(stats.actionsOpen)} hint="Corrective actions pending" tone="primary" icon="☑" />
+                <StatCard title="Major/Minor" value={String(stats.major + stats.minor)} hint="Remaining items" tone="primary" icon="☑" />
               </div>
             </section>
 
@@ -1273,7 +1286,7 @@ function App() {
 
                 <div className="cardFooter">
                   <div className="muted">
-                    Tip: Use <strong>Defects</strong> view to search, filter, and run root-cause workflow.
+                    Tip: Use <strong>Defects</strong> view to search, filter, and sort by <strong>created date</strong> or <strong>severity</strong>.
                   </div>
                 </div>
               </div>
@@ -1281,15 +1294,15 @@ function App() {
               <div className="card">
                 <div className="cardHeader">
                   <div>
-                    <div className="cardTitle">Recently updated</div>
-                    <div className="cardSub">What changed most recently</div>
+                    <div className="cardTitle">Recently created</div>
+                    <div className="cardSub">Latest logged defects</div>
                   </div>
                 </div>
 
                 <div className="recentList">
                   {(defects || [])
                     .slice()
-                    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+                    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
                     .slice(0, 5)
                     .map((d) => (
                       <button key={d.id} className="recentItem" onClick={() => openDefectDetails(d)}>
@@ -1301,7 +1314,7 @@ function App() {
                           </div>
                         </div>
                         <div className="recentBottom">
-                          <span className="mutedSmall">Updated {formatDate(new Date(d.updatedAt).toISOString())}</span>
+                          <span className="mutedSmall">Created {d.createdAt ? formatDate(new Date(d.createdAt).toISOString()) : "—"}</span>
                           <span className="mutedSmall">Workflow {d.rootCause?.stage || "New"}</span>
                         </div>
                       </button>
@@ -1329,26 +1342,11 @@ function App() {
               </div>
 
               <div className="filtersGrid">
-                <SearchInput
-                  label="Search"
-                  value={filters.query}
-                  placeholder="Title, description, tags, causes…"
-                  onChange={(v) => setFilters((f) => ({ ...f, query: v }))}
-                />
+                <SearchInput label="Search" value={filters.query} placeholder="Title, description, tags, causes…" onChange={(v) => setFilters((f) => ({ ...f, query: v }))} />
 
-                <Select
-                  label="Status"
-                  value={filters.status}
-                  onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
-                  options={statusOptions}
-                />
+                <Select label="Status" value={filters.status} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} options={statusOptions} />
 
-                <Select
-                  label="Severity"
-                  value={filters.severity}
-                  onChange={(v) => setFilters((f) => ({ ...f, severity: v }))}
-                  options={severityOptions}
-                />
+                <Select label="Severity" value={filters.severity} onChange={(v) => setFilters((f) => ({ ...f, severity: v }))} options={severityOptions} />
 
                 <Select
                   label="Category"
@@ -1357,12 +1355,7 @@ function App() {
                   options={[{ value: "", label: "All categories" }, ...categories.map((c) => ({ value: c, label: c }))]}
                 />
 
-                <Select
-                  label="Area"
-                  value={filters.area}
-                  onChange={(v) => setFilters((f) => ({ ...f, area: v }))}
-                  options={[{ value: "", label: "All areas" }, ...areas.map((a) => ({ value: a, label: a }))]}
-                />
+                <Select label="Area" value={filters.area} onChange={(v) => setFilters((f) => ({ ...f, area: v }))} options={[{ value: "", label: "All areas" }, ...areas.map((a) => ({ value: a, label: a }))]} />
 
                 <Select
                   label="Assigned to"
@@ -1371,12 +1364,7 @@ function App() {
                   options={[{ value: "", label: "Anyone" }, ...assignees.map((a) => ({ value: a, label: a || "—" }))]}
                 />
 
-                <TextInput
-                  label="Tag contains"
-                  value={filters.tag}
-                  onChange={(v) => setFilters((f) => ({ ...f, tag: v }))}
-                  placeholder="e.g. torque"
-                />
+                <TextInput label="Tag contains" value={filters.tag} onChange={(v) => setFilters((f) => ({ ...f, tag: v }))} placeholder="e.g. torque" />
 
                 <div className="inlineTwo">
                   <Select
@@ -1384,10 +1372,8 @@ function App() {
                     value={filters.sortBy}
                     onChange={(v) => setFilters((f) => ({ ...f, sortBy: v }))}
                     options={[
-                      { value: "updatedAt", label: "Last updated" },
-                      { value: "detectedOn", label: "Detected date" },
+                      { value: "createdAt", label: "Created date" },
                       { value: "severity", label: "Severity" },
-                      { value: "status", label: "Status" },
                     ]}
                   />
                   <Select
@@ -1418,7 +1404,7 @@ function App() {
                         area: "",
                         assignedTo: "",
                         tag: "",
-                        sortBy: "updatedAt",
+                        sortBy: "createdAt",
                         sortDir: "desc",
                       })
                     }
@@ -1439,20 +1425,15 @@ function App() {
                   <button className="btn btnGhost" onClick={doExportCsv}>
                     Export CSV
                   </button>
-                  <button className="btn btnGhost" onClick={openImport}>
-                    Import
+                  <button className="btn btnGhost" onClick={doExportPdf}>
+                    Export PDF
                   </button>
                 </div>
               </div>
 
               <div className="defectCards defectRows">
                 {filtered.map((d) => (
-                  <DefectCard
-                    key={d.id}
-                    defect={d}
-                    selected={d.id === selectedId}
-                    onSelect={() => setSelectedId(d.id)}
-                  />
+                  <DefectCard key={d.id} defect={d} selected={d.id === selectedId} onSelect={() => setSelectedId(d.id)} />
                 ))}
                 {filtered.length === 0 ? (
                   <div className="emptyState">
@@ -1479,9 +1460,7 @@ function App() {
               </div>
 
               {!selectedDefect ? (
-                <div className="emptyState">
-                  Select a defect card to see details here. This panel is optimized for quick triage and deeper workflow editing.
-                </div>
+                <div className="emptyState">Select a defect card to see details here. This panel is optimized for quick triage and deeper workflow editing.</div>
               ) : (
                 <div className="detailsBody">
                   <div className="detailsHero">
@@ -1511,8 +1490,8 @@ function App() {
                         <div className="detailsMetaValue">{selectedDefect.assignedTo || "Unassigned"}</div>
                       </div>
                       <div className="detailsMetaItem">
-                        <div className="detailsMetaLabel">Workflow</div>
-                        <div className="detailsMetaValue">{selectedDefect.rootCause?.stage || "New"}</div>
+                        <div className="detailsMetaLabel">Created</div>
+                        <div className="detailsMetaValue">{selectedDefect.createdAt ? formatDate(new Date(selectedDefect.createdAt).toISOString()) : "—"}</div>
                       </div>
                     </div>
 
@@ -1554,74 +1533,23 @@ function App() {
                     </div>
 
                     <div className="detailsGrid">
-                      <TextInput
-                        label="Title"
-                        value={selectedDefect.title}
-                        onChange={(v) => patchDefect(selectedDefect, { title: v })}
-                        placeholder="Short summary"
-                      />
-                      <Select
-                        label="Status"
-                        value={selectedDefect.status}
-                        onChange={(v) => patchDefect(selectedDefect, { status: v })}
-                        options={statusOptions.filter((o) => o.value !== "All")}
-                      />
-                      <Select
-                        label="Severity"
-                        value={selectedDefect.severity}
-                        onChange={(v) => patchDefect(selectedDefect, { severity: v })}
-                        options={severityOptions.filter((o) => o.value !== "All")}
-                      />
-                      <TextInput
-                        label="Category"
-                        value={selectedDefect.category}
-                        onChange={(v) => patchDefect(selectedDefect, { category: v })}
-                        placeholder="e.g. Process"
-                      />
-                      <TextInput
-                        label="Area"
-                        value={selectedDefect.area}
-                        onChange={(v) => patchDefect(selectedDefect, { area: v })}
-                        placeholder="e.g. Assembly"
-                      />
-                      <TextInput
-                        label="Detected by"
-                        value={selectedDefect.detectedBy}
-                        onChange={(v) => patchDefect(selectedDefect, { detectedBy: v })}
-                        placeholder="Person / role"
-                      />
-                      <TextInput
-                        label="Assigned to"
-                        value={selectedDefect.assignedTo}
-                        onChange={(v) => patchDefect(selectedDefect, { assignedTo: v })}
-                        placeholder="Owner"
-                      />
+                      <TextInput label="Title" value={selectedDefect.title} onChange={(v) => patchDefect(selectedDefect, { title: v })} placeholder="Short summary" />
+                      <Select label="Status" value={selectedDefect.status} onChange={(v) => patchDefect(selectedDefect, { status: v })} options={statusOptions.filter((o) => o.value !== "All")} />
+                      <Select label="Severity" value={selectedDefect.severity} onChange={(v) => patchDefect(selectedDefect, { severity: v })} options={severityOptions.filter((o) => o.value !== "All")} />
+                      <TextInput label="Category" value={selectedDefect.category} onChange={(v) => patchDefect(selectedDefect, { category: v })} placeholder="e.g. Process" />
+                      <TextInput label="Area" value={selectedDefect.area} onChange={(v) => patchDefect(selectedDefect, { area: v })} placeholder="e.g. Assembly" />
+                      <TextInput label="Detected by" value={selectedDefect.detectedBy} onChange={(v) => patchDefect(selectedDefect, { detectedBy: v })} placeholder="Person / role" />
+                      <TextInput label="Assigned to" value={selectedDefect.assignedTo} onChange={(v) => patchDefect(selectedDefect, { assignedTo: v })} placeholder="Owner" />
                       <label className="field">
                         <span className="label">Detected on</span>
-                        <input
-                          className="input"
-                          type="date"
-                          value={selectedDefect.detectedOn || ""}
-                          onChange={(e) => patchDefect(selectedDefect, { detectedOn: e.target.value })}
-                        />
+                        <input className="input" type="date" value={selectedDefect.detectedOn || ""} onChange={(e) => patchDefect(selectedDefect, { detectedOn: e.target.value })} />
                       </label>
                       <label className="field">
                         <span className="label">Due date</span>
-                        <input
-                          className="input"
-                          type="date"
-                          value={selectedDefect.dueDate || ""}
-                          onChange={(e) => patchDefect(selectedDefect, { dueDate: e.target.value })}
-                        />
+                        <input className="input" type="date" value={selectedDefect.dueDate || ""} onChange={(e) => patchDefect(selectedDefect, { dueDate: e.target.value })} />
                       </label>
 
-                      <TextArea
-                        label="Description"
-                        value={selectedDefect.description}
-                        onChange={(v) => patchDefect(selectedDefect, { description: v })}
-                        placeholder="What happened? Where? Impact?"
-                        rows={4}
-                      />
+                      <TextArea label="Description" value={selectedDefect.description} onChange={(v) => patchDefect(selectedDefect, { description: v })} placeholder="What happened? Where? Impact?" rows={4} />
 
                       <TextArea
                         label="Resolution summary"
@@ -1633,12 +1561,7 @@ function App() {
 
                       <label className="field">
                         <span className="label">Tags (comma separated)</span>
-                        <input
-                          className="input"
-                          value={(selectedDefect.tags || []).join(", ")}
-                          onChange={(e) => patchDefect(selectedDefect, { tags: asStringArray(e.target.value) })}
-                          placeholder="e.g. torque, line2"
-                        />
+                        <input className="input" value={(selectedDefect.tags || []).join(", ")} onChange={(e) => patchDefect(selectedDefect, { tags: asStringArray(e.target.value) })} placeholder="e.g. torque, line2" />
                       </label>
 
                       <label className="field">
@@ -1670,12 +1593,7 @@ function App() {
                     </div>
 
                     <div className="detailsGrid">
-                      <Select
-                        label="Stage"
-                        value={selectedDefect.rootCause?.stage || "New"}
-                        onChange={(v) => patchRootCause(selectedDefect, { stage: v })}
-                        options={workflowStageOptions}
-                      />
+                      <Select label="Stage" value={selectedDefect.rootCause?.stage || "New"} onChange={(v) => patchRootCause(selectedDefect, { stage: v })} options={workflowStageOptions} />
                       <TextArea
                         label="Problem statement"
                         value={selectedDefect.rootCause?.problemStatement || ""}
@@ -1690,13 +1608,7 @@ function App() {
                         placeholder="Immediate actions to protect customer / isolate impact"
                         rows={3}
                       />
-                      <TextArea
-                        label="5 Whys"
-                        value={selectedDefect.rootCause?.fiveWhys || ""}
-                        onChange={(v) => patchRootCause(selectedDefect, { fiveWhys: v })}
-                        placeholder="Use numbered lines; one why per line"
-                        rows={6}
-                      />
+                      <TextArea label="5 Whys" value={selectedDefect.rootCause?.fiveWhys || ""} onChange={(v) => patchRootCause(selectedDefect, { fiveWhys: v })} placeholder="Use numbered lines; one why per line" rows={6} />
                       <TextArea
                         label="Fishbone (Ishikawa)"
                         value={selectedDefect.rootCause?.fishbone || ""}
@@ -1752,20 +1664,10 @@ function App() {
                       />
 
                       <div className="inlineTwo">
-                        <TextInput
-                          label="Validated by"
-                          value={selectedDefect.rootCause?.validatedBy || ""}
-                          onChange={(v) => patchRootCause(selectedDefect, { validatedBy: v })}
-                          placeholder="Name"
-                        />
+                        <TextInput label="Validated by" value={selectedDefect.rootCause?.validatedBy || ""} onChange={(v) => patchRootCause(selectedDefect, { validatedBy: v })} placeholder="Name" />
                         <label className="field">
                           <span className="label">Validated at</span>
-                          <input
-                            className="input"
-                            type="date"
-                            value={selectedDefect.rootCause?.validatedAt || ""}
-                            onChange={(e) => patchRootCause(selectedDefect, { validatedAt: e.target.value })}
-                          />
+                          <input className="input" type="date" value={selectedDefect.rootCause?.validatedAt || ""} onChange={(e) => patchRootCause(selectedDefect, { validatedAt: e.target.value })} />
                         </label>
                       </div>
 
@@ -1798,56 +1700,24 @@ function App() {
                       {(selectedDefect.actions || []).map((a) => (
                         <div key={a.id} className="actionCard">
                           <div className="actionTop">
-                            <input
-                              className="input actionTitle"
-                              value={a.title}
-                              placeholder="Action title"
-                              onChange={(e) => patchAction(selectedDefect, a.id, { title: e.target.value })}
-                            />
-                            <button
-                              className="iconButton"
-                              onClick={() => deleteAction(selectedDefect, a.id)}
-                              aria-label="Delete action"
-                            >
+                            <input className="input actionTitle" value={a.title} placeholder="Action title" onChange={(e) => patchAction(selectedDefect, a.id, { title: e.target.value })} />
+                            <button className="iconButton" onClick={() => deleteAction(selectedDefect, a.id)} aria-label="Delete action">
                               🗑
                             </button>
                           </div>
 
                           <div className="actionGrid">
-                            <TextInput
-                              label="Owner"
-                              value={a.owner}
-                              onChange={(v) => patchAction(selectedDefect, a.id, { owner: v })}
-                              placeholder="Name"
-                            />
-                            <Select
-                              label="Status"
-                              value={a.status}
-                              onChange={(v) => patchAction(selectedDefect, a.id, { status: v })}
-                              options={actionStatusOptions}
-                            />
+                            <TextInput label="Owner" value={a.owner} onChange={(v) => patchAction(selectedDefect, a.id, { owner: v })} placeholder="Name" />
+                            <Select label="Status" value={a.status} onChange={(v) => patchAction(selectedDefect, a.id, { status: v })} options={actionStatusOptions} />
                             <label className="field">
                               <span className="label">Due date</span>
-                              <input
-                                className="input"
-                                type="date"
-                                value={a.dueDate || ""}
-                                onChange={(e) => patchAction(selectedDefect, a.id, { dueDate: e.target.value })}
-                              />
+                              <input className="input" type="date" value={a.dueDate || ""} onChange={(e) => patchAction(selectedDefect, a.id, { dueDate: e.target.value })} />
                             </label>
-                            <TextArea
-                              label="Notes"
-                              value={a.notes}
-                              onChange={(v) => patchAction(selectedDefect, a.id, { notes: v })}
-                              placeholder="Context, links, acceptance criteria"
-                              rows={3}
-                            />
+                            <TextArea label="Notes" value={a.notes} onChange={(v) => patchAction(selectedDefect, a.id, { notes: v })} placeholder="Context, links, acceptance criteria" rows={3} />
                           </div>
                         </div>
                       ))}
-                      {(selectedDefect.actions || []).length === 0 ? (
-                        <div className="emptyState small">No actions yet. Add corrective actions to drive closure.</div>
-                      ) : null}
+                      {(selectedDefect.actions || []).length === 0 ? <div className="emptyState small">No actions yet. Add corrective actions to drive closure.</div> : null}
                     </div>
                   </section>
                 </div>
@@ -1861,14 +1731,11 @@ function App() {
             <section className="sectionHeader">
               <div className="sectionTitle">Data Tools</div>
               <div className="sectionActions">
-                <button className="btn btnGhost" onClick={doExportJson}>
-                  Export JSON
-                </button>
                 <button className="btn btnGhost" onClick={doExportCsv}>
                   Export CSV
                 </button>
-                <button className="btn btnGhost" onClick={openImport}>
-                  Import
+                <button className="btn btnGhost" onClick={doExportPdf}>
+                  Export PDF
                 </button>
               </div>
             </section>
@@ -1886,26 +1753,14 @@ function App() {
                   <div className="toolRow">
                     <div>
                       <div className="toolTitle">Export</div>
-                      <div className="muted">Download your defects as JSON or CSV.</div>
+                      <div className="muted">Download your defects as CSV or a printable report.</div>
                     </div>
                     <div className="toolActions">
-                      <button className="btn btnPrimary" onClick={doExportJson}>
-                        JSON
-                      </button>
-                      <button className="btn btnGhost" onClick={doExportCsv}>
+                      <button className="btn btnPrimary" onClick={doExportCsv}>
                         CSV
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="toolRow">
-                    <div>
-                      <div className="toolTitle">Import</div>
-                      <div className="muted">Paste JSON from an export or a defect array.</div>
-                    </div>
-                    <div className="toolActions">
-                      <button className="btn btnPrimary" onClick={openImport}>
-                        Import
+                      <button className="btn btnGhost" onClick={doExportPdf}>
+                        PDF
                       </button>
                     </div>
                   </div>
@@ -1931,9 +1786,7 @@ function App() {
                       <button
                         className="btn btnDanger"
                         onClick={() => {
-                          const ok = window.confirm(
-                            "This will remove all defects stored by this app in your browser. Continue?"
-                          );
+                          const ok = window.confirm("This will remove all defects stored by this app in your browser. Continue?");
                           if (ok) clearAllData();
                         }}
                       >
@@ -1960,9 +1813,9 @@ function App() {
 
                 <div className="healthGrid">
                   <div className="healthItem">
-                    <div className="healthLabel">High risk concentration</div>
-                    <div className="healthValue">{stats.total ? Math.round(((stats.critical + stats.high) / stats.total) * 100) : 0}%</div>
-                    <div className="mutedSmall">Critical/High as percent of total</div>
+                    <div className="healthLabel">Critical rate</div>
+                    <div className="healthValue">{stats.total ? Math.round((stats.critical / stats.total) * 100) : 0}%</div>
+                    <div className="mutedSmall">Critical as percent of total</div>
                   </div>
 
                   <div className="healthItem">
@@ -1972,19 +1825,14 @@ function App() {
                   </div>
 
                   <div className="healthItem">
-                    <div className="healthLabel">Actions outstanding</div>
-                    <div className="healthValue">{stats.actionsOpen}</div>
-                    <div className="mutedSmall">Across all defects</div>
+                    <div className="healthLabel">Major items</div>
+                    <div className="healthValue">{stats.major}</div>
+                    <div className="mutedSmall">Major severity defects</div>
                   </div>
 
                   <div className="healthItem">
                     <div className="healthLabel">Workflow maturity</div>
-                    <div className="healthValue">
-                      {defects.length
-                        ? Math.round(defects.reduce((acc, d) => acc + workflowProgress(d), 0) / defects.length)
-                        : 0}
-                      %
-                    </div>
+                    <div className="healthValue">{defects.length ? Math.round(defects.reduce((acc, d) => acc + workflowProgress(d), 0) / defects.length) : 0}%</div>
                     <div className="mutedSmall">Average workflow progress</div>
                   </div>
                 </div>
@@ -1992,8 +1840,7 @@ function App() {
                 <div className="divider" />
 
                 <div className="muted">
-                  Suggested workflow: <strong>Contain</strong> → <strong>Analyze</strong> → <strong>Verify</strong> →{" "}
-                  <strong>Correct</strong> → <strong>Validate</strong> → <strong>Close</strong>.
+                  Suggested workflow: <strong>Contain</strong> → <strong>Analyze</strong> → <strong>Verify</strong> → <strong>Correct</strong> → <strong>Validate</strong> → <strong>Close</strong>.
                 </div>
               </div>
             </section>
@@ -2034,10 +1881,9 @@ function App() {
                   showToast("danger", "Please add a title before saving.");
                   return;
                 }
-                upsertDefect(draft);
+                upsertDefect(normalizeDefect(draft), { reason: "create" });
                 setIsNewOpen(false);
                 setDraft(null);
-                showToast("success", "Defect created.");
               }}
             >
               Save defect
@@ -2048,81 +1894,31 @@ function App() {
         {!draft ? null : (
           <div className="detailsGrid">
             <TextInput label="Title" value={draft.title} onChange={(v) => setDraft((d) => ({ ...d, title: v }))} placeholder="Short summary" />
-            <Select
-              label="Severity"
-              value={draft.severity}
-              onChange={(v) => setDraft((d) => ({ ...d, severity: v }))}
-              options={severityOptions.filter((o) => o.value !== "All")}
-            />
+            <Select label="Severity" value={draft.severity} onChange={(v) => setDraft((d) => ({ ...d, severity: v }))} options={severityOptions.filter((o) => o.value !== "All")} />
             <TextInput label="Category" value={draft.category} onChange={(v) => setDraft((d) => ({ ...d, category: v }))} placeholder="e.g. Process" />
             <TextInput label="Area" value={draft.area} onChange={(v) => setDraft((d) => ({ ...d, area: v }))} placeholder="e.g. Assembly" />
             <label className="field">
               <span className="label">Detected on</span>
-              <input
-                className="input"
-                type="date"
-                value={draft.detectedOn || ""}
-                onChange={(e) => setDraft((d) => ({ ...d, detectedOn: e.target.value }))}
-              />
+              <input className="input" type="date" value={draft.detectedOn || ""} onChange={(e) => setDraft((d) => ({ ...d, detectedOn: e.target.value }))} />
             </label>
             <TextInput label="Detected by" value={draft.detectedBy} onChange={(v) => setDraft((d) => ({ ...d, detectedBy: v }))} placeholder="Person / role" />
             <TextInput label="Assigned to" value={draft.assignedTo} onChange={(v) => setDraft((d) => ({ ...d, assignedTo: v }))} placeholder="Owner" />
             <TextArea label="Description" value={draft.description} onChange={(v) => setDraft((d) => ({ ...d, description: v }))} placeholder="What happened? Where? Impact?" rows={5} />
             <label className="field">
               <span className="label">Tags (comma separated)</span>
-              <input
-                className="input"
-                value={(draft.tags || []).join(", ")}
-                onChange={(e) => setDraft((d) => ({ ...d, tags: asStringArray(e.target.value) }))}
-                placeholder="e.g. torque, line2"
-              />
+              <input className="input" value={(draft.tags || []).join(", ")} onChange={(e) => setDraft((d) => ({ ...d, tags: asStringArray(e.target.value) }))} placeholder="e.g. torque, line2" />
             </label>
           </div>
         )}
       </Modal>
 
-      <Modal
-        open={importOpen}
-        title="Import defects (JSON)"
-        description="Paste JSON from an export. You can merge with existing or replace everything."
-        onClose={() => setImportOpen(false)}
-        footer={
-          <div className="modalFooterRow">
-            <button className="btn btnGhost" onClick={() => setImportOpen(false)}>
-              Cancel
-            </button>
-            <button className="btn btnPrimary" onClick={applyImport}>
-              Import
-            </button>
-          </div>
-        }
-      >
-        <div className="detailsGrid">
-          <Select
-            label="Mode"
-            value={importMode}
-            onChange={(v) => setImportMode(v)}
-            options={[
-              { value: "merge", label: "Merge (by id)" },
-              { value: "replace", label: "Replace all" },
-            ]}
-          />
-          <label className="field">
-            <span className="label">JSON</span>
-            <textarea
-              className="textarea"
-              value={importText}
-              rows={10}
-              placeholder='Paste { "defects": [ ... ] } or [ ... ]'
-              onChange={(e) => setImportText(e.target.value)}
-            />
-          </label>
-        </div>
-      </Modal>
-
-      {toast ? (
-        <div className={`toast toast_${toast.type}`} role="status" aria-live="polite">
-          {toast.message}
+      {toastItems.length ? (
+        <div className="toastStack" aria-live="polite" aria-label="Notifications">
+          {toastItems.map((t) => (
+            <div key={t.id} className={`toast toast_${t.type}`} role="status">
+              {t.message}
+            </div>
+          ))}
         </div>
       ) : null}
     </div>

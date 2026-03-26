@@ -83,6 +83,19 @@ body {
     radial-gradient(1000px 700px at 90% 10%, rgba(6, 182, 212, 0.12), transparent 55%),
     var(--bg);
   color: var(--text);
+  transition: background 220ms ease, color 220ms ease;
+}
+
+/* Smooth transitions when toggling theme (kept lightweight) */
+body,
+.topbar,
+.card,
+.btn,
+.input,
+.select,
+.textarea,
+.nav {
+  transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
 }
 
 code {
@@ -1330,22 +1343,41 @@ code {
   background: rgba(15, 23, 42, 0.7);
 }
 
-.toast {
+/* Toasts: small, non-intrusive, top-right, stackable */
+.toastStack {
   position: fixed;
-  bottom: 16px;
+  top: 16px;
   right: 16px;
   z-index: 60;
+  display: grid;
+  gap: 10px;
+  max-width: min(520px, calc(100vw - 32px));
+  pointer-events: none; /* clicks pass-through; toasts are informational */
+}
+
+.toast {
+  pointer-events: none;
   border-radius: 14px;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   font-weight: 800;
   font-size: 13px;
-  max-width: min(520px, calc(100vw - 32px));
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+}
+
+[data-theme="dark"] .toast {
+  background: rgba(15, 23, 42, 0.92);
 }
 
 .toast_info {
   background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+}
+
+[data-theme="dark"] .toast_info {
+  background: rgba(15, 23, 42, 0.92);
   color: var(--text);
 }
 
@@ -1355,10 +1387,76 @@ code {
   color: rgba(8, 145, 178, 0.95);
 }
 
+[data-theme="dark"] .toast_success {
+  color: rgba(34, 211, 238, 0.95);
+}
+
 .toast_danger {
   background: rgba(239, 68, 68, 0.12);
   border-color: rgba(239, 68, 68, 0.25);
   color: rgba(185, 28, 28, 0.95);
+}
+
+[data-theme="dark"] .toast_danger {
+  color: rgba(251, 113, 133, 0.95);
+}
+
+/* Simple print/PDF report styling (used by the print window) */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .printReport {
+    padding: 24px !important;
+  }
+
+  .printHeader {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: baseline;
+    margin-bottom: 16px;
+  }
+
+  .printTitle {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+  }
+
+  .printMeta {
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .printTable {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+  }
+
+  .printTable th,
+  .printTable td {
+    border: 1px solid #e2e8f0;
+    padding: 8px 10px;
+    vertical-align: top;
+    font-size: 12px;
+  }
+
+  .printTable th {
+    background: #f8fafc;
+    text-align: left;
+    font-weight: 900;
+  }
+
+  .printFooter {
+    margin-top: 14px;
+    font-size: 11px;
+    color: #64748b;
+  }
 }
 
 .toolList {
