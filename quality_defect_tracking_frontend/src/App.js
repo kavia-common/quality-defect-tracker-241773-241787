@@ -141,13 +141,7 @@ function severityRank(s) {
   return s === "Critical" ? 3 : s === "Major" ? 2 : 1;
 }
 
-/**
- * @param {DefectStatus} s
- * @returns {number}
- */
-function statusRank(s) {
-  return s === "Open" ? 1 : s === "In Progress" ? 2 : s === "Resolved" ? 3 : 4;
-}
+
 
 /**
  * @returns {RootCause}
