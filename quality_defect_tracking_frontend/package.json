@@ -4,7 +4,7 @@
   "private": true,
   "description": "Frontend-only Quality Defect Tracking and Root Cause Workflow demo (localStorage).",
   "dependencies": {
-    "cross-env": "^10.1.0",
+    "cross-env": "^7.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-scripts": "5.0.1"
